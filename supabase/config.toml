@@ -1,0 +1,14 @@
+[functions.gmail-connect]
+verify_jwt = true
+
+[functions.gmail-oauth-callback]
+verify_jwt = false
+
+[functions.gmail-status]
+verify_jwt = true
+
+[functions.gmail-disconnect]
+verify_jwt = true
+
+[functions.n8n-gmail-detection]
+verify_jwt = false
