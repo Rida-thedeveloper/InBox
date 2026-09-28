@@ -76,6 +76,14 @@ export default function TasksScreen({
 
     return true;
   });
+  const newestFirstTasks = filteredTasks
+    .map((task, index) => ({ task, index, createdAt: Date.parse(task.createdAt || task.created_at || '') }))
+    .sort((a, b) => {
+      const aTime = Number.isNaN(a.createdAt) ? 0 : a.createdAt;
+      const bTime = Number.isNaN(b.createdAt) ? 0 : b.createdAt;
+      return bTime - aTime || a.index - b.index;
+    })
+    .map(({ task }) => task);
 
   const handleDeletePrompt = (task) => {
     confirmAction({
@@ -222,7 +230,7 @@ export default function TasksScreen({
             </TouchableOpacity>
           </View>
         ) : (
-          filteredTasks.map((task) => {
+          newestFirstTasks.map((task) => {
             const isDone = task.completed;
             const catConfig = getCategoryColor(task.category || task.tag);
 

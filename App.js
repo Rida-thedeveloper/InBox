@@ -16,6 +16,13 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { completeAuthRedirect, getAuthRedirectUri, supabase } from './src/lib/supabase';
 import { getWhatsAppScheduleLabel } from './src/lib/whatsappSender';
 import { loadManualTasks, removeManualTask, saveManualTask } from './src/lib/manualTasks';
+import {
+  loadApprovedWhatsAppTaskIds,
+  loadDismissedWhatsAppTaskIds,
+  saveApprovedWhatsAppTaskIds,
+  saveDismissedWhatsAppTaskIds,
+} from './src/lib/whatsappReview';
+import { loadHiddenRemoteTaskIds, saveHiddenRemoteTaskIds } from './src/lib/hiddenRemoteTasks';
 
 // Screens
 import HomeScreen from './src/screens/HomeScreen';
@@ -50,6 +57,7 @@ function AppContent() {
   const [authReady, setAuthReady] = useState(false);
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [currentTab, setCurrentTab] = useState('home');
+  const [focusDetectionId, setFocusDetectionId] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [detections, setDetections] = useState([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -60,6 +68,9 @@ function AppContent() {
   const [inboxRefreshKey, setInboxRefreshKey] = useState(0);
   const handledLocationActions = useRef(new Set());
   const deletedWhatsAppTaskIds = useRef(new Set());
+  const approvedWhatsAppTaskIds = useRef(new Set());
+  const dismissedWhatsAppTaskIds = useRef(new Set());
+  const hiddenRemoteTaskIds = useRef(new Set());
   const permissionAlertShown = useRef(false);
 
   useEffect(() => {
@@ -174,6 +185,14 @@ function AppContent() {
     if (!authUserId || !supabase) return undefined;
     let active = true;
     const loadDetections = async () => {
+      const [approvedIds, dismissedIds, hiddenIds] = await Promise.all([
+        loadApprovedWhatsAppTaskIds(authUserId),
+        loadDismissedWhatsAppTaskIds(authUserId),
+        loadHiddenRemoteTaskIds(authUserId),
+      ]);
+      approvedWhatsAppTaskIds.current = new Set(approvedIds);
+      dismissedWhatsAppTaskIds.current = new Set(dismissedIds);
+      hiddenRemoteTaskIds.current = new Set([...hiddenRemoteTaskIds.current, ...hiddenIds]);
       const { data, error } = await supabase
         .from('pending_inbox_detections')
         .select('id,title,source,source_channel,message_id,description,context_text,date_time,priority,status,created_at')
@@ -182,8 +201,10 @@ function AppContent() {
         .order('created_at', { ascending: false });
       if (!active || error || !data) return;
       const pendingRows = data.filter((row) => row.status === 'pending');
-      const approvedRows = data.filter((row) => row.status === 'approved');
-      const cloudDetections = pendingRows.map((row) => ({
+      const approvedRows = data.filter((row) => row.status === 'approved' && !hiddenRemoteTaskIds.current.has(row.id));
+      const cloudDetections = pendingRows
+        .filter((row) => !hiddenRemoteTaskIds.current.has(row.id))
+        .map((row) => ({
         id: row.id,
         title: row.title,
         source: row.source,
@@ -216,6 +237,7 @@ function AppContent() {
           completed: false,
           priority: row.priority || 'medium',
           sender: row.source_channel,
+          createdAt: row.created_at,
           remote: true,
         };
       });
@@ -226,7 +248,9 @@ function AppContent() {
         .order('created_at', { ascending: false });
       if (whatsappError) console.warn('Could not load WhatsApp tasks:', whatsappError.message);
       const whatsappTasks = (whatsappRows || [])
-        .filter((row) => !deletedWhatsAppTaskIds.current.has(row.id))
+        .filter((row) => !deletedWhatsAppTaskIds.current.has(row.id)
+          && !hiddenRemoteTaskIds.current.has(row.id)
+          && approvedWhatsAppTaskIds.current.has(row.id))
         .map((row) => {
         const date = typeof row.due_date === 'string' ? row.due_date.slice(0, 10) : null;
         const dueTime = getWhatsAppScheduleLabel(date, row.due_time, row.description, row.original_message);
@@ -245,14 +269,37 @@ function AppContent() {
           completed: false,
           priority: row.priority || 'medium',
           sender: row.sender,
+          createdAt: row.created_at,
           original_message: row.original_message,
           chat_id: row.chat_id,
           message_id: row.message_id,
           whatsappRemote: true,
         };
         });
+      const whatsappDetections = (whatsappRows || [])
+        .filter((row) => !deletedWhatsAppTaskIds.current.has(row.id)
+          && !hiddenRemoteTaskIds.current.has(row.id)
+          && !approvedWhatsAppTaskIds.current.has(row.id)
+          && !dismissedWhatsAppTaskIds.current.has(row.id))
+        .map((row) => ({
+          id: row.id,
+          title: row.task_title,
+          source: 'whatsapp',
+          sourceChannel: 'WhatsApp',
+          description: row.description || '',
+          contextText: row.original_message || row.description || '',
+          dateTime: [row.due_date, row.due_time].filter(Boolean).join(' '),
+          priority: row.priority || 'medium',
+          status: 'pending',
+          createdAt: row.created_at,
+          sender: row.sender,
+          original_message: row.original_message,
+          chat_id: row.chat_id,
+          message_id: row.message_id,
+          whatsappRemote: true,
+        }));
       const allCloudTasks = [...cloudTasks, ...whatsappTasks];
-      setDetections(cloudDetections);
+      setDetections([...cloudDetections, ...whatsappDetections]);
       setTasks((current) => {
         const existingRemote = new Map(current.filter((task) => task.remote || task.whatsappRemote).map((task) => [task.id, task]));
         return [
@@ -392,26 +439,60 @@ function AppContent() {
     deletedWhatsAppTaskIds.current.add(taskId);
   };
 
-  const showWhatsAppTaskError = (title, error) => {
-    const message = error?.message || 'Please try again.';
-    console.error(title, error);
-    if (Platform.OS === 'web' && typeof globalThis.alert === 'function') {
-      globalThis.alert(`${title}\n\n${message}`);
-      return;
+  const deleteRemoteDetectionTask = async (taskId) => {
+    if (!supabase) throw new Error('Supabase is not available. Please try again.');
+    const { data, error, status, statusText } = await supabase
+      .from('pending_inbox_detections')
+      .delete()
+      .eq('id', taskId)
+      .select('id');
+    if (error) {
+      console.error('[Detection task DELETE] Supabase error', {
+        taskId,
+        status,
+        statusText,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+      throw error;
     }
-    Alert.alert(title, message);
+    if (!data?.some((row) => row.id === taskId)) {
+      throw new Error('Supabase did not confirm deleting this task. It is still available in the database.');
+    }
+  };
+
+  const hideRemoteTaskInApp = async (task) => {
+    const { id } = task;
+    hiddenRemoteTaskIds.current.add(id);
+    if (task.whatsappRemote) deletedWhatsAppTaskIds.current.add(id);
+    setTasks((current) => current.filter((item) => item.id !== id));
+    setDetections((current) => current.filter((item) => item.id !== id));
+    try {
+      await saveHiddenRemoteTaskIds(authUserId, [...hiddenRemoteTaskIds.current]);
+    } catch (error) {
+      console.warn('Task was hidden in this session but could not be saved locally:', error?.message || error);
+    }
+
+    try {
+      if (task.whatsappRemote) await deleteWhatsAppTaskFromDatabase(id);
+      else if (task.remote) await deleteRemoteDetectionTask(id);
+    } catch (error) {
+      // Keep the task removed from this app even if Supabase cannot remove its row.
+      console.warn('Task remains hidden in this app; Supabase removal failed:', error?.message || error);
+    }
   };
 
   // Toggle task completion
   const handleToggleComplete = async (taskId) => {
     const currentTask = tasks.find((task) => task.id === taskId);
     if (currentTask?.whatsappRemote && !currentTask.completed) {
-      try {
-        await deleteWhatsAppTaskFromDatabase(taskId);
-        setTasks((current) => current.filter((task) => task.id !== taskId));
-      } catch (error) {
-        showWhatsAppTaskError('Could not complete WhatsApp task', error);
-      }
+      await hideRemoteTaskInApp(currentTask);
+      return;
+    }
+    if (currentTask?.remote && !currentTask.completed) {
+      await hideRemoteTaskInApp(currentTask);
       return;
     }
     const nextTasks = tasks.map((task) => task.id === taskId ? { ...task, completed: !task.completed } : task);
@@ -518,32 +599,20 @@ function AppContent() {
   // Delete task
   const handleDeleteTask = async (taskId) => {
     const task = tasks.find((item) => item.id === taskId);
-    if (task?.whatsappRemote) {
-      try {
-        await deleteWhatsAppTaskFromDatabase(taskId);
-      } catch (error) {
-        showWhatsAppTaskError('Could not delete WhatsApp task', error);
-        return;
-      }
+    if (task?.whatsappRemote || task?.remote) {
+      await hideRemoteTaskInApp(task);
+      Alert.alert('Task Deleted', 'The task has been removed from InBox.');
+      return;
     }
-    if (task?.remote && supabase) {
-      const { error } = await supabase.from('pending_inbox_detections')
-        .update({ status: 'dismissed' }).eq('id', taskId).eq('status', 'approved');
-      if (error) {
-        Alert.alert('Could not delete task', error.message);
-        return;
-      }
-    }
+    setTasks((current) => current.filter((item) => item.id !== taskId));
     if (task?.id?.startsWith('task-manual-')) {
       try {
         await removeManualTask(authUserId, taskId);
       } catch (error) {
-        Alert.alert('Could not delete task', error?.message || 'Please try again.');
-        return;
+        console.error('Task was removed from the current app view but could not be removed from local storage:', error?.message || error);
       }
     }
     const nextTasks = tasks.filter((item) => item.id !== taskId);
-    setTasks((current) => current.filter((item) => item.id !== taskId));
     if (task?.location_enabled) {
       try {
         await syncLocationGeofences(authUserId, nextTasks);
@@ -569,7 +638,17 @@ function AppContent() {
 
   // Approve AI detected task -> moves to tasks list
   const handleApproveDetection = async (detection) => {
-    if (detection.remote && supabase) {
+    if (detection.whatsappRemote) {
+      const previousIds = [...approvedWhatsAppTaskIds.current];
+      approvedWhatsAppTaskIds.current.add(detection.id);
+      try {
+        await saveApprovedWhatsAppTaskIds(authUserId, [...approvedWhatsAppTaskIds.current]);
+      } catch (error) {
+        approvedWhatsAppTaskIds.current = new Set(previousIds);
+        Alert.alert('Could not confirm WhatsApp task', error?.message || 'Please try again.');
+        return;
+      }
+    } else if (detection.remote && supabase) {
       const { error } = await supabase.from('pending_inbox_detections')
         .update({ status: 'approved' }).eq('id', detection.id);
       if (error) {
@@ -581,7 +660,7 @@ function AppContent() {
     const detectionDueDate = /^\d{4}-\d{2}-\d{2}/.test(detectionDueTime) ? detectionDueTime.slice(0, 10) : null;
     const detectionDueTimeLower = detectionDueTime.toLowerCase();
     const createdTask = {
-      id: detection.remote ? detection.id : `task-detected-${Date.now()}`,
+      id: detection.remote || detection.whatsappRemote ? detection.id : `task-detected-${Date.now()}`,
       title: detection.title,
       description: detection.description || `Extracted from ${detection.sourceChannel}`,
       source: detection.source,
@@ -595,12 +674,17 @@ function AppContent() {
       date: detectionDueDate,
       completed: false,
       priority: (detection.priority || 'medium').toLowerCase(),
-      sender: detection.sourceChannel,
+      createdAt: detection.createdAt || new Date().toISOString(),
+      sender: detection.sender || detection.sourceChannel,
       actionLabel: detection.source === 'zoom' ? 'Join' : (detection.source === 'whatsapp' ? 'Chat' : undefined),
       remote: Boolean(detection.remote),
+      whatsappRemote: Boolean(detection.whatsappRemote),
+      original_message: detection.original_message,
+      chat_id: detection.chat_id,
+      message_id: detection.message_id,
     };
 
-    setTasks(prev => [createdTask, ...prev]);
+    setTasks(prev => [createdTask, ...prev.filter((task) => task.id !== createdTask.id)]);
     setDetections(prev => prev.filter(d => d.id !== detection.id));
     Alert.alert('Task Added', `"${detection.title}" is now added to your Tasks.`);
   };
@@ -608,7 +692,17 @@ function AppContent() {
   // Dismiss detection
   const handleDismissDetection = async (detectionId) => {
     const detection = detections.find((item) => item.id === detectionId);
-    if (detection?.remote && supabase) {
+    if (detection?.whatsappRemote) {
+      const previousIds = [...dismissedWhatsAppTaskIds.current];
+      dismissedWhatsAppTaskIds.current.add(detectionId);
+      try {
+        await saveDismissedWhatsAppTaskIds(authUserId, [...dismissedWhatsAppTaskIds.current]);
+      } catch (error) {
+        dismissedWhatsAppTaskIds.current = new Set(previousIds);
+        Alert.alert('Could not dismiss WhatsApp detection', error?.message || 'Please try again.');
+        return;
+      }
+    } else if (detection?.remote && supabase) {
       const { error } = await supabase.from('pending_inbox_detections')
         .update({ status: 'dismissed' }).eq('id', detectionId);
       if (error) {
@@ -620,7 +714,7 @@ function AppContent() {
   };
 
   // Handle task actions (Join Zoom, Navigate, etc.)
-  const handleTaskAction = (task) => {
+  const handleTaskAction = async (task) => {
     if (task.source === 'zoom') {
       Alert.alert(
         'Launching Zoom Meeting',
@@ -628,11 +722,29 @@ function AppContent() {
         [{ text: 'Dismiss', style: 'cancel' }, { text: 'Connect Now', onPress: () => {} }]
       );
     } else if (task.source === 'location') {
-      Alert.alert(
-        'Location Navigation',
-        `Saved location: ${task.location_name || task.location?.placeName || task.tag || 'No location set'}${task.location_enabled ? `\nRadius: ${task.radius} m` : ''}.`,
-        [{ text: 'OK', style: 'cancel' }]
-      );
+      const latitude = task.latitude ?? task.location?.latitude;
+      const longitude = task.longitude ?? task.location?.longitude;
+      const hasCoordinates = latitude !== undefined && latitude !== null && String(latitude).trim() !== ''
+        && longitude !== undefined && longitude !== null && String(longitude).trim() !== ''
+        && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude));
+      const destination = hasCoordinates
+        ? `${latitude},${longitude}`
+        : task.location_name || task.location?.placeName || task.tag || '';
+      if (!destination) {
+        Alert.alert('Location unavailable', 'This task does not have a saved place to navigate to.');
+        return;
+      }
+      const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
+      try {
+        // In embedded/mobile web previews, popup tabs can be blocked silently.
+        if (Platform.OS === 'web') {
+          window.location.assign(directionsUrl);
+          return;
+        }
+        await Linking.openURL(directionsUrl);
+      } catch (error) {
+        Alert.alert('Could not open navigation', error?.message || 'Please try again.');
+      }
     } else if (task.source === 'whatsapp') {
       Alert.alert(
         'WhatsApp Thread',
@@ -648,6 +760,10 @@ function AppContent() {
   };
 
   const pendingDetectionsCount = detections.filter(d => d.status === 'pending').length;
+  const handleNavigateToTab = (tab, detectionId = null) => {
+    setFocusDetectionId(tab === 'detections' ? detectionId : null);
+    setCurrentTab(tab);
+  };
   const authUser = authSession?.user;
   const accountName = authUser?.user_metadata?.full_name || authUser?.user_metadata?.name || authUser?.email?.split('@')[0] || 'there';
   const userProfile = {
@@ -686,7 +802,7 @@ function AppContent() {
           <HomeScreen
             tasks={tasks}
             onToggleComplete={handleToggleComplete}
-            onNavigateToTab={setCurrentTab}
+            onNavigateToTab={handleNavigateToTab}
             pendingDetectionsCount={pendingDetectionsCount}
             detections={detections}
             user={userProfile}
@@ -709,6 +825,8 @@ function AppContent() {
         return (
           <DetectionsScreen
             detections={detections}
+            focusDetectionId={focusDetectionId}
+            onDetectionFocused={setFocusDetectionId}
             user={userProfile}
             onApproveDetection={handleApproveDetection}
             onDismissDetection={handleDismissDetection}
@@ -718,10 +836,11 @@ function AppContent() {
         return (
           <PlacesScreen
             user={userProfile}
+            tasks={tasks}
             onAddTaskPress={handleOpenCreateModal}
-            onAddLocationTask={(reminder) => {
+            onAddLocationTask={async (reminder) => {
               const newTask = {
-                id: `task-loc-${Date.now()}`,
+                id: `task-manual-${Date.now()}`,
                 title: reminder.title,
                 description: reminder.description || `When near ${reminder.placeName}, InBox will remind you.`,
                 source: 'location',
@@ -732,13 +851,39 @@ function AppContent() {
                 date: new Date().toISOString().split('T')[0],
                 completed: false,
                 priority: 'medium',
+                createdAt: new Date().toISOString(),
                 location: {
                   placeName: reminder.placeName,
                   radius: reminder.radius,
                 },
+                placeReminder: true,
+                locationReminderActive: true,
                 actionLabel: 'Navigate'
               };
+              await saveManualTask(authUserId, newTask);
               setTasks(prev => [newTask, ...prev]);
+            }}
+            onUpdateLocationReminder={async (id, reminder) => {
+              const existingTask = tasks.find((task) => task.id === id);
+              if (!existingTask) return;
+              const updatedTask = {
+                ...existingTask,
+                title: reminder.title,
+                description: reminder.description || `When near ${reminder.placeName}, InBox will remind you.`,
+                category: reminder.category || 'Personal',
+                tag: reminder.placeName,
+                dueTime: `Location Reminder (${reminder.radius})`,
+                location: { ...existingTask.location, placeName: reminder.placeName, radius: reminder.radius },
+              };
+              await saveManualTask(authUserId, updatedTask);
+              setTasks((current) => current.map((task) => task.id === id ? updatedTask : task));
+            }}
+            onToggleLocationReminder={async (id) => {
+              const existingTask = tasks.find((task) => task.id === id);
+              if (!existingTask) return;
+              const updatedTask = { ...existingTask, locationReminderActive: existingTask.locationReminderActive === false };
+              await saveManualTask(authUserId, updatedTask);
+              setTasks((current) => current.map((task) => task.id === id ? updatedTask : task));
             }}
           />
         );

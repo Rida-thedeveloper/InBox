@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -18,13 +18,33 @@ export default function DetectionsScreen({
   detections, 
   user,
   onApproveDetection, 
-  onDismissDetection
+  onDismissDetection,
+  focusDetectionId,
+  onDetectionFocused,
 }) {
   const { darkMode, theme } = useTheme();
   const [selectedDetection, setSelectedDetection] = useState(null);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [highlightedDetectionId, setHighlightedDetectionId] = useState(null);
+  const [cardPositions, setCardPositions] = useState({});
+  const listRef = useRef(null);
+  const handledFocusIdRef = useRef(null);
 
   const pendingList = detections.filter(d => d.status === 'pending');
+
+  useEffect(() => {
+    if (!focusDetectionId || handledFocusIdRef.current === focusDetectionId || cardPositions[focusDetectionId] === undefined) return undefined;
+    handledFocusIdRef.current = focusDetectionId;
+    listRef.current?.scrollTo({ y: Math.max(0, cardPositions[focusDetectionId] - 12), animated: true });
+    setHighlightedDetectionId(focusDetectionId);
+    onDetectionFocused?.(null);
+  }, [focusDetectionId, cardPositions, onDetectionFocused]);
+
+  useEffect(() => {
+    if (!highlightedDetectionId) return undefined;
+    const timeout = globalThis.setTimeout(() => setHighlightedDetectionId(null), 2400);
+    return () => globalThis.clearTimeout(timeout);
+  }, [highlightedDetectionId]);
 
   const handleOpenConfirm = (item) => {
     setSelectedDetection(item);
@@ -141,6 +161,7 @@ export default function DetectionsScreen({
 
       {/* Detections List */}
       <ScrollView 
+        ref={listRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollList}
       >
@@ -164,7 +185,18 @@ export default function DetectionsScreen({
                     : `${Math.floor(ageMs / 86400000)}d ago`;
             
             return (
-              <View key={item.id} style={[styles.card, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}>
+              <View
+                key={item.id}
+                onLayout={({ nativeEvent }) => {
+                  const y = nativeEvent.layout.y;
+                  setCardPositions((current) => current[item.id] === y ? current : { ...current, [item.id]: y });
+                }}
+                style={[
+                  styles.card,
+                  { backgroundColor: theme.cardBackground, borderColor: theme.border },
+                  highlightedDetectionId === item.id && styles.focusedCard,
+                ]}
+              >
                 
                 {/* Source Pill and Time Ago */}
                 <View style={styles.cardHeader}>
@@ -383,6 +415,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 6,
     elevation: 2,
+  },
+  focusedCard: {
+    borderColor: '#2563EB',
+    borderWidth: 2,
   },
   cardHeader: {
     flexDirection: 'row',

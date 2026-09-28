@@ -14,32 +14,42 @@ import { useTheme } from '../theme/ThemeContext';
 import AppBrand from '../components/AppBrand';
 import UserAvatar from '../components/UserAvatar';
 
-export default function PlacesScreen({ onAddLocationTask, user }) {
+export default function PlacesScreen({
+  onAddLocationTask,
+  onUpdateLocationReminder,
+  onToggleLocationReminder,
+  tasks = [],
+  user,
+}) {
   const { darkMode, theme } = useTheme();
-  const [reminders, setReminders] = useState([]);
+  const reminders = tasks
+    .filter((task) => task.placeReminder)
+    .map((task) => ({
+      ...task,
+      placeName: task.location?.placeName || task.tag || '',
+      radius: task.location?.radius || '500 m',
+      active: task.locationReminderActive !== false && !task.completed,
+    }));
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [reminderToEdit, setReminderToEdit] = useState(null);
 
-  const toggleReminderActive = (id) => {
-    setReminders(prev =>
-      prev.map(r => r.id === id ? { ...r, active: !r.active } : r)
-    );
+  const toggleReminderActive = async (id) => {
+    try {
+      await onToggleLocationReminder?.(id);
+    } catch (error) {
+      Alert.alert('Could not update reminder', error?.message || 'Please try again.');
+    }
   };
 
-  const handleSaveReminder = (savedReminder) => {
+  const handleSaveReminder = async (savedReminder) => {
     if (reminderToEdit) {
-      setReminders(prev =>
-        prev.map(r => r.id === savedReminder.id ? { ...r, ...savedReminder } : r)
-      );
+      await onUpdateLocationReminder?.(savedReminder.id, savedReminder);
       Alert.alert('Reminder Updated', `"${savedReminder.title}" updated.`);
     } else {
-      setReminders(prev => [savedReminder, ...prev]);
+      if (!onAddLocationTask) throw new Error('Could not save this location reminder.');
+      await onAddLocationTask(savedReminder);
       Alert.alert('Reminder Created', `"${savedReminder.title}" added.`);
-      
-      if (onAddLocationTask) {
-        onAddLocationTask(savedReminder);
-      }
     }
     setReminderToEdit(null);
   };

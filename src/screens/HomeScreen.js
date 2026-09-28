@@ -14,6 +14,7 @@ import FilterPills from '../components/FilterPills';
 import TaskCard from '../components/TaskCard';
 import { colors } from '../theme/colors';
 import { useTheme } from '../theme/ThemeContext';
+import { getWhatsAppContactName } from '../lib/whatsappSender';
 
 export default function HomeScreen({ 
   tasks, 
@@ -25,7 +26,7 @@ export default function HomeScreen({
   onTaskAction,
   onRefresh,
 }) {
-  const { theme } = useTheme();
+  const { darkMode, theme } = useTheme();
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -65,14 +66,42 @@ export default function HomeScreen({
   };
 
   const displayTasks = getFilteredTasks();
-  const firstPendingDetection = detections.find((detection) => detection.status === 'pending');
-  const detectionAge = firstPendingDetection?.createdAt
-    ? Date.now() - new Date(firstPendingDetection.createdAt).getTime()
-    : null;
-  const detectionAgeLabel = detectionAge === null || Number.isNaN(detectionAge) ? ''
-    : detectionAge < 60000 ? 'Just now'
-      : detectionAge < 3600000 ? `${Math.floor(detectionAge / 60000)}m ago`
-        : `${Math.floor(detectionAge / 3600000)}h ago`;
+  const pendingDetections = detections
+    .filter((detection) => detection.status === 'pending')
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 3);
+  const getDetectionAgeLabel = (detection) => {
+    if (!detection?.createdAt) return '';
+    const age = Date.now() - new Date(detection.createdAt).getTime();
+    if (Number.isNaN(age)) return '';
+    if (age < 60000) return 'Just now';
+    if (age < 3600000) return `${Math.floor(age / 60000)}m ago`;
+    return `${Math.floor(age / 3600000)}h ago`;
+  };
+  const getDetectionSenderLabel = (detection) => (
+    detection.source === 'whatsapp'
+      ? getWhatsAppContactName(detection.sender)
+      : detection.sender
+  );
+  const getDetectionPalette = (detection) => {
+    const source = `${detection.sourceChannel || ''} ${detection.source || ''}`.toLowerCase();
+    if (source.includes('whatsapp')) {
+      return darkMode
+        ? { card: '#10271D', border: '#28583E', tag: '#193B2A', accent: '#86EFAC', icon: '#4ADE80' }
+        : { card: '#F0FDF4', border: '#BBF7D0', tag: '#DCFCE7', accent: '#15803D', icon: '#16A34A' };
+    }
+    if (source.includes('calendar')) {
+      return darkMode
+        ? { card: '#282313', border: '#55451B', tag: '#3C3016', accent: '#FCD34D', icon: '#FBBF24' }
+        : { card: '#FFFBEB', border: '#FDE68A', tag: '#FEF3C7', accent: '#B45309', icon: '#D97706' };
+    }
+    if (source.includes('gmail') || source.includes('email')) {
+      return darkMode
+        ? { card: '#2A191D', border: '#5B2D35', tag: '#402128', accent: '#FDA4AF', icon: '#FB7185' }
+        : { card: '#FFF5F5', border: '#FECACA', tag: '#FEE2E2', accent: '#B91C1C', icon: '#DC2626' };
+    }
+    return { card: theme.cardBackground, border: theme.border, tag: theme.surfaceVariant, accent: theme.textSecondary, icon: theme.textSecondary };
+  };
 
   return (
     <ScrollView 
@@ -204,28 +233,40 @@ export default function HomeScreen({
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity 
-                style={styles.pendingDetectionCard}
-                activeOpacity={0.85}
-                onPress={() => onNavigateToTab('detections')}
-              >
-                <View style={styles.pendingHeader}>
-                  <View style={styles.pendingTag}>
-                    <Ionicons name="flash" size={12} color="#D97706" />
-                    <Text style={styles.pendingTagText}>AI Auto-Detected</Text>
-                  </View>
-                  <Text style={styles.pendingTime}>{detectionAgeLabel}</Text>
-                </View>
-                <Text style={styles.pendingTitle}>
-                  {firstPendingDetection?.title}
-                </Text>
-                <Text style={styles.pendingSource}>
-                  From {firstPendingDetection?.sourceChannel || firstPendingDetection?.source || 'connected source'}
-                </Text>
-                <View style={styles.pendingActionRow}>
-                  <Text style={styles.pendingTapToReview}>Tap to review & add to tasks →</Text>
-                </View>
-              </TouchableOpacity>
+              {pendingDetections.map((detection) => {
+                const palette = getDetectionPalette(detection);
+                const sourceLabel = detection.sourceChannel || detection.source || 'Auto-Detected';
+                const sourceKey = sourceLabel.toLowerCase();
+                const sourceIcon = sourceKey.includes('whatsapp') ? 'chatbubble-ellipses'
+                  : sourceKey.includes('calendar') ? 'calendar'
+                    : sourceKey.includes('gmail') || sourceKey.includes('email') ? 'mail' : 'flash';
+                const senderName = getDetectionSenderLabel(detection);
+                return (
+                  <TouchableOpacity
+                    key={detection.id}
+                    style={[styles.pendingDetectionCard, { backgroundColor: palette.card, borderColor: palette.border }]}
+                    activeOpacity={0.85}
+                      onPress={() => onNavigateToTab('detections', detection.id)}
+                  >
+                    <View style={styles.pendingHeader}>
+                      <View style={[styles.pendingTag, { backgroundColor: palette.tag }]}>
+                        <Ionicons name={sourceIcon} size={12} color={palette.icon} />
+                        <Text style={[styles.pendingTagText, { color: palette.accent }]}>{sourceLabel}</Text>
+                      </View>
+                      <Text style={[styles.pendingTime, { color: palette.accent }]}>{getDetectionAgeLabel(detection)}</Text>
+                    </View>
+                    <Text style={[styles.pendingTitle, { color: darkMode ? theme.textPrimary : palette.accent }]}>
+                      {detection.title}
+                    </Text>
+                    <Text style={[styles.pendingSource, { color: palette.accent }]}>
+                      From {sourceLabel}{senderName ? ` · ${senderName}` : ''}
+                    </Text>
+                    <View style={[styles.pendingActionRow, { borderTopColor: palette.border }]}>
+                      <Text style={[styles.pendingTapToReview, { color: palette.accent }]}>Tap to review & add to tasks →</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           )}
 
@@ -330,6 +371,7 @@ const styles = StyleSheet.create({
     borderColor: '#FDE68A',
     padding: 14,
     marginHorizontal: 18,
+    marginBottom: 10,
   },
   pendingHeader: {
     flexDirection: 'row',

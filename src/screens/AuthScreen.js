@@ -26,6 +26,8 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
   useEffect(() => {
     if (recoveryMode) setMode('recovery');
   }, [recoveryMode]);
@@ -34,25 +36,27 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
   const isRecovery = mode === 'recovery';
 
   const submit = async () => {
+    setNotice(null);
+    setCanResendConfirmation(false);
     if (isSignup && !name.trim()) {
-      Alert.alert('Name required', 'Please enter your name to create an account.');
+      setNotice({ type: 'error', text: 'Please enter your name to create an account.' });
       return;
     }
     if (!isRecovery && !/^\S+@\S+\.\S+$/.test(email.trim())) {
-      Alert.alert('Check your email', 'Enter a valid email address to continue.');
+      setNotice({ type: 'error', text: 'Enter a valid email address to continue.' });
       return;
     }
     if (password.length < 8) {
-      Alert.alert('Password too short', 'Use at least 8 characters for your password.');
+      setNotice({ type: 'error', text: 'Use at least 8 characters for your password.' });
       return;
     }
     if ((isSignup || isRecovery) && password !== confirmPassword) {
-      Alert.alert('Passwords do not match', 'Check both password fields and try again.');
+      setNotice({ type: 'error', text: 'Passwords do not match. Check both password fields and try again.' });
       return;
     }
 
     if (!hasSupabaseConfig || !supabase) {
-      Alert.alert('Supabase not configured', 'Add your Supabase URL and publishable key to the project .env file, then restart Expo.');
+      setNotice({ type: 'error', text: 'Supabase is not configured. Add its URL and publishable key to .env, then restart Expo.' });
       return;
     }
 
@@ -61,7 +65,7 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
       if (isRecovery) {
         const { error } = await supabase.auth.updateUser({ password });
         if (error) throw error;
-        Alert.alert('Password updated', 'Your password has been changed.');
+        setNotice({ type: 'success', text: 'Your password has been changed.' });
         onRecoveryComplete?.();
       } else if (isSignup) {
         const { data, error } = await supabase.auth.signUp({
@@ -76,7 +80,11 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
         if (data.session) {
           onAuthenticated?.(data.session);
         } else {
-          Alert.alert('Verify your email', 'Supabase sent a confirmation link to your inbox. Open it to finish creating your account.');
+          setCanResendConfirmation(true);
+          setNotice({
+            type: 'success',
+            text: 'Signup was accepted. Check your inbox and spam folder for the confirmation email. If it does not arrive, check Supabase email/SMTP settings and try resending below.',
+          });
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -87,7 +95,37 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
         onAuthenticated?.(data.session);
       }
     } catch (error) {
-      Alert.alert(isRecovery ? 'Could not update password' : isSignup ? 'Could not create account' : 'Could not sign in', error.message || 'Please try again.');
+      if (!isSignup && !isRecovery && error.code === 'email_not_confirmed') {
+        setCanResendConfirmation(true);
+      }
+      setNotice({ type: 'error', text: error.message || 'Please try again.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const resendConfirmation = async () => {
+    setNotice(null);
+    if (!supabase) {
+      setNotice({ type: 'error', text: 'Supabase is not configured. Add its URL and publishable key to .env, then restart Expo.' });
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setNotice({ type: 'error', text: 'Enter the same valid email address you used to sign up.' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: { emailRedirectTo: getAuthRedirectUri() },
+      });
+      if (error) throw error;
+      setNotice({ type: 'success', text: 'Resend request accepted. Check your inbox and spam folder. Delivery depends on your Supabase email provider settings.' });
+    } catch (error) {
+      setNotice({ type: 'error', text: error.message || 'Could not resend the confirmation email.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -186,6 +224,16 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
         </View>
 
         <View style={styles.formCard}>
+          {notice && (
+            <View style={[styles.notice, notice.type === 'error' ? styles.errorNotice : styles.successNotice]} accessibilityRole="alert">
+              <Text style={[styles.noticeText, notice.type === 'error' ? styles.errorNoticeText : styles.successNoticeText]}>{notice.text}</Text>
+              {canResendConfirmation && !isRecovery && (
+                <Pressable onPress={resendConfirmation} disabled={isSubmitting}>
+                  <Text style={styles.resendLink}>{isSubmitting ? 'Sending…' : 'Resend confirmation email'}</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
           {!isRecovery && (
             <Pressable style={styles.googleButton} onPress={handleGoogle} disabled={isSubmitting}>
               <FontAwesome name="google" size={18} color="#4285F4" />
@@ -293,7 +341,7 @@ export default function AuthScreen({ onAuthenticated, recoveryMode = false, onRe
             <Text style={styles.switchPrompt}>
               {isSignup ? 'Already have an account? ' : "Don't have an account? "}
             </Text>
-            <Pressable onPress={() => setMode(isSignup ? 'login' : 'signup')}>
+            <Pressable onPress={() => { setMode(isSignup ? 'login' : 'signup'); setNotice(null); setCanResendConfirmation(false); }}>
               <Text style={styles.switchLink}>{isSignup ? 'Sign in' : 'Sign up'}</Text>
             </Pressable>
           </View>}
@@ -319,6 +367,13 @@ const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: 28, lineHeight: 34, fontWeight: '800', letterSpacing: -0.8 },
   subtitle: { color: colors.textSecondary, fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 8, maxWidth: 280 },
   formCard: { backgroundColor: colors.cardBackground, borderRadius: 22, padding: 20, borderWidth: 1, borderColor: colors.borderLight, shadowColor: '#0F172A', shadowOpacity: 0.04, shadowRadius: 16, shadowOffset: { width: 0, height: 7 }, elevation: 2 },
+  notice: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 15 },
+  errorNotice: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+  successNotice: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
+  noticeText: { fontSize: 12, lineHeight: 18 },
+  errorNoticeText: { color: '#B91C1C' },
+  successNoticeText: { color: '#166534' },
+  resendLink: { color: colors.primary, fontSize: 12, fontWeight: '800', marginTop: 9 },
   googleButton: { height: 50, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 11 },
   googleText: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 21 },

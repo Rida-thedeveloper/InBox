@@ -47,7 +47,7 @@ export default function AddLocationReminderModal({
     setCategory('General');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!taskTitle.trim() || !placeName.trim()) {
       Alert.alert('Required', 'Please enter both a task title and location.');
       return;
@@ -63,8 +63,12 @@ export default function AddLocationReminderModal({
       description: notes.trim(),
     };
 
-    onSaveReminder(savedReminder);
-    onClose();
+    try {
+      await onSaveReminder(savedReminder);
+      onClose();
+    } catch (error) {
+      Alert.alert('Could not save location reminder', error?.message || 'Please try again.');
+    }
   };
 
   return (
