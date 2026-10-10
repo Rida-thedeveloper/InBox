@@ -263,24 +263,24 @@ export default function DetectionsScreen({
                   <Ionicons name="sparkles" size={26} color="#2563EB" />
                 </View>
 
-                <Text style={styles.popupHeading}>
+                <Text style={[styles.popupHeading, { color: darkMode ? '#FFFFFF' : theme.textPrimary }]}>
                   Task detected. Do you want to add it?
                 </Text>
                 
-                <Text style={styles.popupSubheading}>
+                <Text style={[styles.popupSubheading, { color: darkMode ? '#CBD5E1' : theme.textSecondary }]}>
                   This task was extracted from your {selectedDetection?.source?.toUpperCase()} messages.
                 </Text>
 
                 {selectedDetection && (
-                  <View style={[styles.popupDetailBox, darkMode && { backgroundColor: theme.surfaceVariant }]}>
+                  <View style={[styles.popupDetailBox, darkMode && { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
                     <View style={styles.popupSourceRow}>
                       {renderSourcePill(selectedDetection.source)}
                       <Text style={styles.popupTime}>{selectedDetection.dateTime || 'Today, 6:00 PM'}</Text>
                     </View>
 
-                    <Text style={styles.popupTaskTitle}>{selectedDetection.title}</Text>
+                    <Text style={[styles.popupTaskTitle, { color: darkMode ? '#FFFFFF' : theme.textPrimary }]}>{selectedDetection.title}</Text>
                     
-                    <Text style={styles.popupDescription}>
+                    <Text style={[styles.popupDescription, { color: darkMode ? '#CBD5E1' : theme.textSecondary }]}>
                       "{selectedDetection.description || selectedDetection.contextText}"
                     </Text>
                   </View>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -18,9 +18,8 @@ function SectionLabel({ children, right, darkMode }) {
 
 export default function IntegrationsScreen({ authUser, onSignOut, gmailConnection, gmailBusy, onConnectGmail, onDisconnectGmail }) {
   const { darkMode, toggleDarkMode, theme } = useTheme();
-  const explainConnect = (provider) => {
-    Alert.alert(`${provider.name} integration`, `${provider.name} sync is managed through your existing InBox workflow.`, [{ text: 'Got it' }]);
-  };
+  const [demoConnections, setDemoConnections] = useState({ gmail: false, whatsapp: false, calendar: false });
+  const connectedCount = Object.values(demoConnections).filter(Boolean).length;
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -40,23 +39,18 @@ export default function IntegrationsScreen({ authUser, onSignOut, gmailConnectio
       <Text style={[styles.title, { color: theme.textPrimary }]}>Settings</Text>
       <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Simple controls for automation & privacy.</Text>
 
-      <SectionLabel right={`${gmailConnection?.connected ? 1 : 0} connected`} darkMode={darkMode}>CONNECTED APPS</SectionLabel>
+      <SectionLabel right={`${connectedCount} connected`} darkMode={darkMode}>CONNECTED APPS</SectionLabel>
       <View style={[styles.card, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}>
         {providers.map((provider, index) => {
           const Icon = provider.iconSet === 'mci' ? MaterialCommunityIcons : Ionicons;
-          const isConnected = provider.id === 'gmail' ? Boolean(gmailConnection?.connected) : false;
-          const rowSubtitle = provider.id === 'gmail'
-            ? (gmailBusy ? 'Connecting securely…' : isConnected ? (gmailConnection.email || 'Connected • Gmail read access') : provider.detail)
-            : provider.detail;
-          const onPress = provider.id === 'gmail'
-            ? (isConnected ? onDisconnectGmail : onConnectGmail)
-            : () => explainConnect(provider);
+          const isConnected = Boolean(demoConnections[provider.id]);
+          const rowSubtitle = provider.detail;
           return (
               <View key={provider.id} style={[styles.row, { borderBottomColor: theme.border }, index === providers.length - 1 && styles.lastRow]}>
               <View style={[styles.iconBox, { backgroundColor: provider.background }]}><Icon name={provider.icon} size={19} color={provider.tint} /></View>
               <View style={styles.rowText}><Text style={[styles.rowTitle, { color: theme.textPrimary }]}>{provider.name}</Text><Text style={[styles.rowSubtitle, { color: theme.textSecondary }]}>{rowSubtitle}</Text></View>
-              <TouchableOpacity style={[styles.connectButton, isConnected && styles.connectedButton, gmailBusy && provider.id === 'gmail' && styles.busyButton]} disabled={gmailBusy && provider.id === 'gmail'} onPress={onPress}>
-                <Text style={[styles.connectText, isConnected && styles.connectedText]}>{gmailBusy && provider.id === 'gmail' ? 'Please wait' : isConnected ? 'Disconnect' : 'Connect'}</Text>
+              <TouchableOpacity style={[styles.connectButton, isConnected && styles.connectedButton]} onPress={() => setDemoConnections((current) => ({ ...current, [provider.id]: !current[provider.id] }))}>
+                <Text style={[styles.connectText, isConnected && styles.connectedText]}>{isConnected ? 'Connected' : 'Connect'}</Text>
                 <Ionicons name={isConnected ? 'checkmark-circle' : 'arrow-forward-circle-outline'} size={17} color={isConnected ? '#059669' : colors.primary} />
               </TouchableOpacity>
             </View>

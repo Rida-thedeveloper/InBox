@@ -16,6 +16,7 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { completeAuthRedirect, getAuthRedirectUri, supabase } from './src/lib/supabase';
 import { getWhatsAppScheduleLabel } from './src/lib/whatsappSender';
 import { loadManualTasks, removeManualTask, saveManualTask } from './src/lib/manualTasks';
+import { deleteCloudManualTask, loadCloudManualTasks, saveCloudManualTask } from './src/lib/cloudTasks';
 import {
   loadApprovedWhatsAppTaskIds,
   loadDismissedWhatsAppTaskIds,
@@ -80,13 +81,31 @@ function AppContent() {
 
   useEffect(() => {
     let active = true;
-    loadManualTasks(authUserId).then((savedTasks) => {
+    (async () => {
+      const cachedTasks = await loadManualTasks(authUserId);
+      let savedTasks = cachedTasks;
+      if (authUserId && supabase) {
+        try {
+          let cloudTasks = await loadCloudManualTasks(authUserId);
+          // Migrate cached tasks and retry any local saves that missed Supabase while offline.
+          const cloudTaskIds = new Set(cloudTasks.map((task) => task.id));
+          const unsyncedTasks = cachedTasks.filter((task) => !cloudTaskIds.has(task.id));
+          if (unsyncedTasks.length) {
+            await Promise.all(unsyncedTasks.map((task) => saveCloudManualTask(authUserId, task)));
+            cloudTasks = await loadCloudManualTasks(authUserId);
+          }
+          savedTasks = cloudTasks;
+          await Promise.all(cloudTasks.map((task) => saveManualTask(authUserId, task)));
+        } catch (error) {
+          console.warn('Could not sync manual tasks with Supabase; showing cached tasks:', error?.message || error);
+        }
+      }
       if (!active) return;
       setTasks((current) => [
         ...current.filter((task) => !task.id?.startsWith('task-manual-') || task.location_enabled),
         ...savedTasks,
       ]);
-    });
+    })();
     return () => { active = false; };
   }, [authUserId]);
 
@@ -498,9 +517,10 @@ function AppContent() {
     const nextTasks = tasks.map((task) => task.id === taskId ? { ...task, completed: !task.completed } : task);
     setTasks(nextTasks);
     const task = nextTasks.find((item) => item.id === taskId);
-    if (task?.id?.startsWith('task-manual-') && !task.location_enabled) {
+    if (task?.id?.startsWith('task-manual-')) {
       try {
-        await saveManualTask(authUserId, task);
+        if (authUserId) await saveCloudManualTask(authUserId, task);
+        if (!task.location_enabled) await saveManualTask(authUserId, task);
       } catch (error) {
         console.error('Could not save manual task completion:', error);
         Alert.alert('Could not update task', error?.message || 'Please try again.');
@@ -540,6 +560,7 @@ function AppContent() {
       });
       if (taskToEdit.location_enabled || taskData.location_enabled) {
         try {
+          if (authUserId && taskData.id?.startsWith('task-manual-')) await saveCloudManualTask(authUserId, taskData);
           const tasksForRegistration = tasks.map((task) => task.id === taskData.id ? { ...task, ...taskForRegistration } : task);
           await syncLocationGeofences(authUserId, tasksForRegistration);
           if (!taskData.location_enabled) {
@@ -555,7 +576,9 @@ function AppContent() {
         }
       } else if (taskData.id?.startsWith('task-manual-')) {
         try {
-          await saveManualTask(authUserId, { ...taskData, completed: nextTasks.find((task) => task.id === taskData.id)?.completed || false });
+          const savedTask = { ...taskData, completed: nextTasks.find((task) => task.id === taskData.id)?.completed || false };
+          if (authUserId) await saveCloudManualTask(authUserId, savedTask);
+          await saveManualTask(authUserId, savedTask);
         } catch (error) {
           Alert.alert('Could not save task', error?.message || 'Please try again.');
           return false;
@@ -570,6 +593,14 @@ function AppContent() {
       if (taskData.location_enabled) {
         try {
           const result = await syncLocationGeofences(authUserId, nextTasks);
+          if (authUserId && taskData.id?.startsWith('task-manual-')) {
+            try {
+              await saveCloudManualTask(authUserId, taskData);
+            } catch (syncError) {
+              console.warn('Location task saved on this device but cloud sync failed:', syncError?.message || syncError);
+              Alert.alert('Task saved on this phone', 'Cloud sync is temporarily unavailable. Keep this app open or reconnect to sync it.');
+            }
+          }
           if (result.permissionMissing) {
             Alert.alert('Location permission required', 'Location permission is required for location reminders. Open device settings and allow background location to activate this reminder.');
           } else {
@@ -580,15 +611,17 @@ function AppContent() {
           return false;
         }
       } else {
+        // Save locally first so a temporary mobile network issue cannot block task creation.
+        await saveManualTask(authUserId, taskData);
+        setTasks(nextTasks);
         try {
-          await saveManualTask(authUserId, taskData);
+          if (authUserId) await saveCloudManualTask(authUserId, taskData);
         } catch (error) {
-          console.error('Could not persist manually created task:', error);
-          Alert.alert('Could not save task', error?.message || 'Please try again.');
-          return false;
+          console.warn('Task saved locally; Supabase sync will retry later:', error?.message || error);
+          Alert.alert('Task saved on this phone', 'Cloud sync is temporarily unavailable. Keep this app open or reconnect to sync it.');
         }
       }
-      setTasks(nextTasks);
+      if (taskData.location_enabled) setTasks(nextTasks);
       if (!taskData.location_enabled) {
         Alert.alert('Task Created', `"${taskData.title}" added to your Tasks & Dashboard.`);
       }
@@ -600,19 +633,38 @@ function AppContent() {
   const handleDeleteTask = async (taskId) => {
     const task = tasks.find((item) => item.id === taskId);
     if (task?.whatsappRemote || task?.remote) {
-      await hideRemoteTaskInApp(task);
-      Alert.alert('Task Deleted', 'The task has been removed from InBox.');
+      try {
+        if (task.whatsappRemote) await deleteWhatsAppTaskFromDatabase(taskId);
+        else await deleteRemoteDetectionTask(taskId);
+      } catch (error) {
+        Alert.alert('Could not delete task', error?.message || 'Supabase could not delete this task. Please try again.');
+        return;
+      }
+      hiddenRemoteTaskIds.current.add(taskId);
+      if (task.whatsappRemote) deletedWhatsAppTaskIds.current.add(taskId);
+      setTasks((current) => current.filter((item) => item.id !== taskId));
+      setDetections((current) => current.filter((item) => item.id !== taskId));
+      try {
+        await saveHiddenRemoteTaskIds(authUserId, [...hiddenRemoteTaskIds.current]);
+      } catch (error) {
+        console.warn('Deleted task could not be added to the local hidden-task cache:', error?.message || error);
+      }
+      Alert.alert('Task Deleted', 'The task has been removed from InBox and Supabase.');
       return;
     }
-    setTasks((current) => current.filter((item) => item.id !== taskId));
-    if (task?.id?.startsWith('task-manual-')) {
-      try {
-        await removeManualTask(authUserId, taskId);
-      } catch (error) {
-        console.error('Task was removed from the current app view but could not be removed from local storage:', error?.message || error);
+    try {
+      if (task?.id?.startsWith('task-manual-') && authUserId) {
+        await deleteCloudManualTask(authUserId, taskId);
       }
+      if (task?.id?.startsWith('task-manual-')) {
+        await removeManualTask(authUserId, taskId);
+      }
+    } catch (error) {
+      Alert.alert('Could not delete task', error?.message || 'Please try again.');
+      return;
     }
     const nextTasks = tasks.filter((item) => item.id !== taskId);
+    setTasks(nextTasks);
     if (task?.location_enabled) {
       try {
         await syncLocationGeofences(authUserId, nextTasks);
@@ -860,6 +912,7 @@ function AppContent() {
                 locationReminderActive: true,
                 actionLabel: 'Navigate'
               };
+              if (authUserId) await saveCloudManualTask(authUserId, newTask);
               await saveManualTask(authUserId, newTask);
               setTasks(prev => [newTask, ...prev]);
             }}
@@ -875,6 +928,7 @@ function AppContent() {
                 dueTime: `Location Reminder (${reminder.radius})`,
                 location: { ...existingTask.location, placeName: reminder.placeName, radius: reminder.radius },
               };
+              if (authUserId) await saveCloudManualTask(authUserId, updatedTask);
               await saveManualTask(authUserId, updatedTask);
               setTasks((current) => current.map((task) => task.id === id ? updatedTask : task));
             }}
@@ -882,6 +936,7 @@ function AppContent() {
               const existingTask = tasks.find((task) => task.id === id);
               if (!existingTask) return;
               const updatedTask = { ...existingTask, locationReminderActive: existingTask.locationReminderActive === false };
+              if (authUserId) await saveCloudManualTask(authUserId, updatedTask);
               await saveManualTask(authUserId, updatedTask);
               setTasks((current) => current.map((task) => task.id === id ? updatedTask : task));
             }}

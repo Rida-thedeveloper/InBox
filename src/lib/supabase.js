@@ -37,12 +37,12 @@ if (supabase && Platform.OS !== 'web') {
 
 const pendingCodeExchanges = new Map();
 
-export function getAuthRedirectUri(path = 'auth/callback') {
+export function getAuthRedirectUri(path = '') {
   if (Platform.OS === 'web') {
     const cleanPath = path.replace(/^\/+/, '');
-    return `${window.location.origin}/${cleanPath}`;
+    return cleanPath ? `${window.location.origin}/${cleanPath}` : `${window.location.origin}/`;
   }
-  return AuthSession.makeRedirectUri({ scheme: 'inboxapp', path });
+  return AuthSession.makeRedirectUri({ scheme: 'inboxapp', path: path || 'auth/callback' });
 }
 
 export async function completeAuthRedirect(url) {

@@ -322,10 +322,10 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
         {/* Subheader: Cancel, Smart Assist Active, Save Task */}
         <View style={[styles.subHeaderBar, darkMode && { backgroundColor: theme.cardBackground, borderBottomColor: theme.border }]}>
           <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={[styles.cancelText, darkMode && { color: theme.textSecondary }]}>Cancel</Text>
           </TouchableOpacity>
 
-          <View style={styles.smartAssistPill}>
+          <View style={[styles.smartAssistPill, darkMode && { backgroundColor: theme.surfaceVariant }]}>
             <Ionicons name="navigate" size={12} color="#2563EB" />
             <Text style={styles.smartAssistText}>SMART ASSIST ACTIVE</Text>
           </View>
@@ -359,31 +359,31 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
             <Text style={[styles.fieldLabel, darkMode && { color: theme.textSecondary }]}>SCHEDULE STRATEGY</Text>
             <View style={[styles.strategyContainer, darkMode && { backgroundColor: theme.surfaceVariant }]}>
               <TouchableOpacity 
-                style={[styles.strategyCard, scheduleStrategy === 'fixed' && styles.strategyCardActive]}
+                style={[styles.strategyCard, scheduleStrategy === 'fixed' && styles.strategyCardActive, darkMode && scheduleStrategy === 'fixed' && { backgroundColor: '#2563EB' }]}
                 onPress={() => setScheduleStrategy('fixed')}
                 activeOpacity={0.8}
               >
                 <Ionicons 
                   name="calendar" 
                   size={16} 
-                  color={scheduleStrategy === 'fixed' ? '#FFFFFF' : '#64748B'} 
+                  color={scheduleStrategy === 'fixed' ? '#FFFFFF' : theme.textSecondary}
                 />
-                <Text style={[styles.strategyText, scheduleStrategy === 'fixed' && styles.strategyTextActive]}>
+                <Text style={[styles.strategyText, darkMode && { color: theme.textSecondary }, scheduleStrategy === 'fixed' && styles.strategyTextActive]}>
                   Fixed Deadline
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
-                style={[styles.strategyCard, scheduleStrategy === 'flexible' && styles.strategyCardActive]}
+                style={[styles.strategyCard, scheduleStrategy === 'flexible' && styles.strategyCardActive, darkMode && scheduleStrategy === 'flexible' && { backgroundColor: '#2563EB' }]}
                 onPress={() => setScheduleStrategy('flexible')}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons 
                   name="sprout" 
                   size={16} 
-                  color={scheduleStrategy === 'flexible' ? '#FFFFFF' : '#64748B'} 
+                  color={scheduleStrategy === 'flexible' ? '#FFFFFF' : theme.textSecondary}
                 />
-                <Text style={[styles.strategyText, scheduleStrategy === 'flexible' && styles.strategyTextActive]}>
+                <Text style={[styles.strategyText, darkMode && { color: theme.textSecondary }, scheduleStrategy === 'flexible' && styles.strategyTextActive]}>
                   Flexible / Someday
                 </Text>
               </TouchableOpacity>
@@ -401,7 +401,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
                       value: date,
                       onChange: (event) => setDate(event.currentTarget.value),
                       'aria-label': 'Choose date',
-                      style: styles.webPickerInput,
+                      style: { ...styles.webPickerInput, color: theme.textPrimary, colorScheme: darkMode ? 'dark' : 'light' },
                     })
                   ) : (
                     <TouchableOpacity style={styles.pickerTouchTarget} onPress={() => openDateTimePicker('date')} accessibilityRole="button" accessibilityLabel="Choose date">
@@ -421,7 +421,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
                       value: targetTime ? (() => { const selected = toPickerDate('', targetTime); return `${String(selected.getHours()).padStart(2, '0')}:${String(selected.getMinutes()).padStart(2, '0')}`; })() : '',
                       onChange: (event) => setTargetTime(event.currentTarget.value ? formatDisplayTime(toPickerDate('', event.currentTarget.value)) : ''),
                       'aria-label': 'Choose time',
-                      style: styles.webPickerInput,
+                      style: { ...styles.webPickerInput, color: theme.textPrimary, colorScheme: darkMode ? 'dark' : 'light' },
                     })
                   ) : (
                     <TouchableOpacity style={styles.pickerTouchTarget} onPress={() => openDateTimePicker('time')} accessibilityRole="button" accessibilityLabel="Choose time">
@@ -446,17 +446,22 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
                 return (
                   <TouchableOpacity
                     key={cat.id}
-                    style={[styles.categoryPill, isSelected && styles.categoryPillActive]}
+                    style={[
+                      styles.categoryPill,
+                      darkMode && { backgroundColor: theme.surfaceVariant, borderColor: theme.border },
+                      isSelected && styles.categoryPillActive,
+                      darkMode && isSelected && { backgroundColor: '#1D4ED8', borderColor: '#3B82F6' },
+                    ]}
                     onPress={() => setCategory(cat.id)}
                     activeOpacity={0.8}
                   >
                     <Ionicons 
                       name={cat.icon} 
                       size={14} 
-                      color={isSelected ? '#2563EB' : '#64748B'} 
+                      color={isSelected ? (darkMode ? '#DBEAFE' : '#2563EB') : theme.textSecondary}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={[styles.categoryPillText, isSelected && styles.categoryPillTextActive]}>
+                    <Text style={[styles.categoryPillText, darkMode && { color: theme.textSecondary }, isSelected && styles.categoryPillTextActive, darkMode && isSelected && { color: '#FFFFFF' }]}>
                       {cat.label}
                     </Text>
                   </TouchableOpacity>
@@ -481,7 +486,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
 
             <View style={styles.locationChoiceRow}>
               <TouchableOpacity
-                style={[styles.locationChoice, !geofenceEnabled && styles.locationChoiceActive]}
+                style={[styles.locationChoice, darkMode && { backgroundColor: theme.surfaceVariant, borderColor: theme.border }, !geofenceEnabled && styles.locationChoiceActive]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: !geofenceEnabled }}
                 onPress={() => {
@@ -493,17 +498,17 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
                   setLocationFeedback('Location reminder is off for this task.');
                 }}
               >
-                <Text style={[styles.locationChoiceText, !geofenceEnabled && styles.locationChoiceTextActive]}>No Location</Text>
+                <Text style={[styles.locationChoiceText, darkMode && { color: theme.textSecondary }, !geofenceEnabled && styles.locationChoiceTextActive]}>No Location</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.locationChoice, geofenceEnabled && styles.locationChoiceActive]}
+                style={[styles.locationChoice, darkMode && { backgroundColor: theme.surfaceVariant, borderColor: theme.border }, geofenceEnabled && styles.locationChoiceActive]}
                 onPress={enableLocationReminder}
                 disabled={requestingGps}
                 accessibilityRole="button"
                 accessibilityState={{ selected: geofenceEnabled }}
               >
-                <Ionicons name={requestingGps ? 'hourglass-outline' : 'location-outline'} size={14} color={geofenceEnabled ? '#FFFFFF' : '#64748B'} />
-                <Text style={[styles.locationChoiceText, geofenceEnabled && styles.locationChoiceTextActive]}>{requestingGps ? 'Getting GPS…' : 'Add Location'}</Text>
+                <Ionicons name={requestingGps ? 'hourglass-outline' : 'location-outline'} size={14} color={geofenceEnabled ? '#FFFFFF' : theme.textSecondary} />
+                <Text style={[styles.locationChoiceText, darkMode && { color: theme.textSecondary }, geofenceEnabled && styles.locationChoiceTextActive]}>{requestingGps ? 'Getting GPS…' : 'Add Location'}</Text>
               </TouchableOpacity>
             </View>
 
