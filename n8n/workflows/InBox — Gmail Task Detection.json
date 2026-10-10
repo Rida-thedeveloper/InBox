@@ -1,0 +1,624 @@
+{
+  "name": "InBox — Gmail Task Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "5aaddd5b-bd76-433a-b552-a845b6894498",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -256,
+        -16
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "SVrdaZMBm9rmYZwV",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "messageId",
+              "name": "messageId",
+              "type": "string",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "id": "sender",
+              "name": "sender",
+              "type": "string",
+              "value": "={{ $json.from?.value?.[0]?.address || $json.from?.text || $json.from || \"\" }}"
+            },
+            {
+              "id": "subject",
+              "name": "subject",
+              "type": "string",
+              "value": "={{ $json.subject || \"\" }}"
+            },
+            {
+              "id": "body",
+              "name": "body",
+              "type": "string",
+              "value": "={{ $json.text || $json.snippet || \"\" }}"
+            },
+            {
+              "id": "receivedAt",
+              "name": "receivedAt",
+              "type": "string",
+              "value": "={{ $json.date || $json.internalDate || \"\" }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5d30d73-90c6-46e1-bd06-11b72e5e5be0",
+      "name": "Extract Email",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -32,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "rowNotExists",
+        "dataTableId": {
+          "__rl": true,
+          "value": "Bv5wOSVhoZ9hd7s7",
+          "mode": "id"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "message_id",
+              "keyValue": "={{ $json.messageId }}"
+            }
+          ]
+        }
+      },
+      "id": "6b0b89f4-9908-4aa3-a9de-9836376f9f85",
+      "name": "Skip If Already Processed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        192,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You analyze a single email and decide whether it contains a clear, actionable task, assignment, deadline, reminder, follow-up, or responsibility for the recipient.\n\nDo NOT classify every email as a task. Ignore normal conversations, newsletters, advertisements, spam, receipts, promotional emails, and purely informational emails that carry no actionable requirement.\n\nIf there is a clear actionable task, set isTask=true and extract:\n- title: a short task title\n- deadline: the due date as written (e.g. \"Friday\", \"2026-10-03\") or \"\" if none\n- time: the due time as written (e.g. \"6:00 PM\") or \"\" if none\n- category: one of \"Study\", \"Work\", or \"Personal\" (best guess)\n- description: one short sentence describing what must be done\n- confidence: a number between 0 and 1 for how confident you are it is an actionable task\n\nIf there is NO actionable task, set isTask=false and return the other fields with empty values: title=\"\", deadline=\"\", time=\"\", category=\"Personal\", description=\"\", confidence=0. Always return every field."
+            },
+            {
+              "content": "=From: {{ $json.sender }}\nSubject: {{ $json.subject }}\n\nBody:\n{{ $json.body }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "textFormat": {
+            "textOptions": {
+              "type": "json_schema",
+              "name": "detected_task",
+              "schema": "{\"type\":\"object\",\"properties\":{\"isTask\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"},\"deadline\":{\"type\":\"string\"},\"time\":{\"type\":\"string\"},\"category\":{\"type\":\"string\",\"enum\":[\"Study\",\"Work\",\"Personal\"]},\"description\":{\"type\":\"string\"},\"confidence\":{\"type\":\"number\"}},\"required\":[\"isTask\",\"title\",\"deadline\",\"time\",\"category\",\"description\",\"confidence\"],\"additionalProperties\":false}",
+              "strict": true
+            }
+          },
+          "temperature": 0
+        }
+      },
+      "id": "776de5cf-28e8-4dd1-a379-20a613abcc6b",
+      "name": "AI Task Detection",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        432,
+        -32
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-task",
+              "leftValue": "={{ $json.output[0].content[0].text.isTask }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bbc478b3-f85c-4c40-baef-798d6364ca40",
+      "name": "Is Task?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        656,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "title",
+              "name": "title",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.title }}"
+            },
+            {
+              "id": "deadline",
+              "name": "deadline",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.deadline || \"\" }}"
+            },
+            {
+              "id": "time",
+              "name": "time",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.time || \"\" }}"
+            },
+            {
+              "id": "category",
+              "name": "category",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.category || \"\" }}"
+            },
+            {
+              "id": "source",
+              "name": "source",
+              "type": "string",
+              "value": "Gmail"
+            },
+            {
+              "id": "message_id",
+              "name": "message_id",
+              "type": "string",
+              "value": "={{ $(\"Extract Email\").item.json.messageId }}"
+            },
+            {
+              "id": "sender",
+              "name": "sender",
+              "type": "string",
+              "value": "={{ $(\"Extract Email\").item.json.sender }}"
+            },
+            {
+              "id": "description",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.description || \"\" }}"
+            },
+            {
+              "id": "confidence",
+              "name": "confidence",
+              "type": "number",
+              "value": "={{ $json.output[0].content[0].text.confidence ?? 0 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "225918d6-4f39-439b-9133-da7058b8529a",
+      "name": "Build Task Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        896,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://unsfgyrcrspnplqvygbt.supabase.co/functions/v1/n8n-gmail-detection",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpTemplatedCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "366be260-1c32-488b-b2ef-3048ff046d2a",
+      "name": "Send Task to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        -96
+      ],
+      "credentials": {
+        "httpTemplatedCustomAuth": {
+          "id": "FmhL2M2LXleBQiYL",
+          "name": "InBox Webhook Secret (Rida)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-2xx",
+              "leftValue": "={{ $json.statusCode >= 200 && $json.statusCode < 300 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "38fc6b4a-e799-4c4a-90b5-8461d0ddf3fa",
+      "name": "Supabase Accepted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Bv5wOSVhoZ9hd7s7",
+          "cachedResultName": "gmail_processed_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "message_id": "={{ $(\"Extract Email\").item.json.messageId }}",
+            "is_task": true,
+            "title": "={{ $(\"Build Task Payload\").item.json.title }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "is_task",
+              "displayName": "is_task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4e465aa3-acc8-4c73-8904-fc3c2b3a3ea0",
+      "name": "Mark Task Processed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "Bv5wOSVhoZ9hd7s7",
+          "cachedResultName": "gmail_processed_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "message_id": "={{ $(\"Extract Email\").item.json.messageId }}",
+            "is_task": false,
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "is_task",
+              "displayName": "is_task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "171c7a9a-26fe-4c04-abf9-b735c7a4c900",
+      "name": "Mark Non-Task Processed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        928,
+        176
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Email": {
+      "main": [
+        [
+          {
+            "node": "Skip If Already Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip If Already Processed": {
+      "main": [
+        [
+          {
+            "node": "AI Task Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Task Detection": {
+      "main": [
+        [
+          {
+            "node": "Is Task?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Task?": {
+      "main": [
+        [
+          {
+            "node": "Build Task Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Non-Task Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Task Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Task to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Task to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Supabase Accepted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Accepted?": {
+      "main": [
+        [
+          {
+            "node": "Mark Task Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "aa92be3f-aafa-4094-8cf8-d71bc6888f6c",
+  "meta": {
+    "instanceId": "8e88a0b411c0ef1e8314ff7101ff9a499540b0c456c6853ac975459f98746f97"
+  },
+  "nodeGroups": [
+    {
+      "id": "4b5e22e4-66e5-471a-8fcc-e4639194c21b",
+      "name": "Fetch new emails",
+      "nodeIds": [
+        "a5d30d73-90c6-46e1-bd06-11b72e5e5be0",
+        "6b0b89f4-9908-4aa3-a9de-9836376f9f85"
+      ],
+      "description": "Extracts sender/subject/body/date from each unread email and skips any message ID already handled."
+    },
+    {
+      "id": "ecb3ffc7-cac1-4b63-9ad8-2e0c8e46e76f",
+      "name": "Detect actionable task",
+      "nodeIds": [
+        "776de5cf-28e8-4dd1-a379-20a613abcc6b",
+        "bbc478b3-f85c-4c40-baef-798d6364ca40"
+      ],
+      "description": "AI classifies the email as an actionable task or not; newsletters, receipts and chatter are filtered out here."
+    },
+    {
+      "id": "88e0b5bc-7e8d-4877-9274-57b450e61720",
+      "name": "Send detection to InBox",
+      "nodeIds": [
+        "225918d6-4f39-439b-9133-da7058b8529a",
+        "366be260-1c32-488b-b2ef-3048ff046d2a",
+        "38fc6b4a-e799-4c4a-90b5-8461d0ddf3fa",
+        "4e465aa3-acc8-4c73-8904-fc3c2b3a3ea0"
+      ],
+      "description": "Posts the detected task to the Supabase receiver with the secret header; records it as handled only after Supabase accepts it."
+    }
+  ],
+  "id": "euY9rYB5bjDCsqOW",
+  "tags": []
+}

@@ -1,0 +1,784 @@
+{
+  "name": "InBox — Google Calendar Task Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "calendarId": {
+          "__rl": true,
+          "value": "ridathedeveloper@gmail.com",
+          "mode": "list",
+          "cachedResultName": "ridathedeveloper@gmail.com"
+        },
+        "triggerOn": "eventCreated",
+        "options": {}
+      },
+      "id": "c1a480b9-f277-43f3-9d10-aaa0d90b0b81",
+      "name": "Google Calendar Trigger",
+      "type": "n8n-nodes-base.googleCalendarTrigger",
+      "typeVersion": 1,
+      "position": [
+        16,
+        48
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "qN5lJgcFb4sd7sm9",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "eventId",
+              "type": "string",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "id": "a2",
+              "name": "title",
+              "type": "string",
+              "value": "={{ $json.summary }}"
+            },
+            {
+              "id": "a3",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "id": "a4",
+              "name": "startTime",
+              "type": "string",
+              "value": "={{ $json.start.dateTime || $json.start.date }}"
+            },
+            {
+              "id": "a5",
+              "name": "endTime",
+              "type": "string",
+              "value": "={{ $json.end.dateTime || $json.end.date }}"
+            },
+            {
+              "id": "a6",
+              "name": "location",
+              "type": "string",
+              "value": "={{ $json.location }}"
+            },
+            {
+              "id": "a7",
+              "name": "organizer",
+              "type": "string",
+              "value": "={{ $json.organizer.email }}"
+            },
+            {
+              "id": "a8",
+              "name": "meetingLink",
+              "type": "string",
+              "value": "={{ $json.hangoutLink }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e0841049-9609-46c5-9c9b-a1f5e7fe3ed2",
+      "name": "Extract Calendar Event",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        288,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nrrKNoleJhYbUT05"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "keyValue": "={{ $json.eventId }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "id": "580fa23d-7fe8-440c-bb8f-65d4878f536a",
+      "name": "Check Already Processed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        192
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "new-event",
+              "leftValue": "={{ $json.event_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0624222a-2b7a-47e7-9847-e5c8da73cc7c",
+      "name": "Is New Event",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        736,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ev = $('Extract Calendar Event').item.json;\nreturn [{ json: ev }];"
+      },
+      "id": "ff2c2bac-c42b-489a-a4b6-5204a4be1271",
+      "name": "Restore Event Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze this Google Calendar event and decide whether it is an actionable task for the user (task, assignment, deadline, reminder, viva, presentation, meeting requiring attendance, appointment, responsibility, or scheduled activity needing the user's attention).\n\nDo NOT classify as a task: holidays, birthdays without an actionable reminder, casual/social events, informational entries, or anything with no meaningful action or responsibility.\n\nEvent:\n- ID: {{ $json.eventId }}\n- Title: {{ $json.title }}\n- Description: {{ $json.description }}\n- Start: {{ $json.startTime }}\n- End: {{ $json.endTime }}\n- Location: {{ $json.location }}\n- Organizer: {{ $json.organizer }}\n- Meeting link: {{ $json.meetingLink }}"
+            }
+          ]
+        },
+        "options": {
+          "system": "You are a strict JSON classifier for a task-detection inbox. Reply with ONLY a single JSON object, no markdown, no extra text.\n\nThe JSON object MUST contain EXACTLY these keys:\nisTask (boolean), title (string), deadline (string, human-readable date like \"October 24\"), time (string, human-readable like \"6:00 PM\"), category (string, one of \"Study\", \"Work\", \"Personal\" — empty when isTask is false), source (always \"Google Calendar\"), message_id (the calendar event ID given to you), sender (organizer email), description (one-sentence summary; empty when isTask is false), confidence (number 0-1; 0 when isTask is false).\n\nCategory rules: academic/study/exam/viva/lecture → \"Study\"; client/work/professional → \"Work\"; personal/health/social-but-actionable → \"Personal\".\n\nWhen isTask is false: title, deadline, time, category, sender, description are empty strings, confidence is 0, but message_id must still be the event ID.",
+          "maxTokens": 512
+        }
+      },
+      "id": "0e828b51-b93d-482c-82b9-a12ef55f8944",
+      "name": "AI Task Detection",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        192
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const eventId = $('Restore Event Fields').item.json.eventId;\nconst blocks = $json.content;\nlet text = '';\nif (Array.isArray(blocks)) {\n  text = blocks.filter(b => b && b.type === 'text').map(b => b.text).join('');\n} else if (typeof blocks === 'string') {\n  text = blocks;\n}\ntext = text.replace(/^```(json)?/im, '').replace(/```\\s*$/m, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  return [{ json: { isTask: false, message_id: eventId, ai_error: true, ai_raw: text.slice(0, 500) } }];\n}\nif (typeof parsed.isTask !== 'boolean') {\n  return [{ json: { isTask: false, message_id: eventId, ai_error: true, ai_raw: text.slice(0, 500) } }];\n}\nparsed.message_id = parsed.message_id || eventId;\nparsed.source = 'Google Calendar';\nif (!parsed.isTask) { parsed.ai_error = false; }\nreturn [{ json: parsed }];"
+      },
+      "id": "e7d44684-4274-4293-af48-abbe97c001ec",
+      "name": "Parse AI Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "is-task",
+              "leftValue": "={{ $json.isTask }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b3ed2109-1d81-4dbe-938f-f66fc3d0917f",
+      "name": "Is Task",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1744,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "title",
+              "type": "string",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "id": "b2",
+              "name": "deadline",
+              "type": "string",
+              "value": "={{ $json.deadline }}"
+            },
+            {
+              "id": "b3",
+              "name": "time",
+              "type": "string",
+              "value": "={{ $json.time }}"
+            },
+            {
+              "id": "b4",
+              "name": "category",
+              "type": "string",
+              "value": "={{ $json.category }}"
+            },
+            {
+              "id": "b5",
+              "name": "source",
+              "type": "string",
+              "value": "Google Calendar"
+            },
+            {
+              "id": "b6",
+              "name": "message_id",
+              "type": "string",
+              "value": "={{ $json.message_id }}"
+            },
+            {
+              "id": "b7",
+              "name": "sender",
+              "type": "string",
+              "value": "={{ $json.sender }}"
+            },
+            {
+              "id": "b8",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "id": "b9",
+              "name": "confidence",
+              "type": "number",
+              "value": "={{ $json.confidence }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5e480f4f-640f-43f0-b0c0-88321efd4f6a",
+      "name": "Build Task Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1968,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://unsfgyrcrspnplqvygbt.supabase.co/functions/v1/n8n-gmail-detection",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpTemplatedCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { title: $json.title, deadline: $json.deadline, time: $json.time, category: $json.category, source: \"Google Calendar\", message_id: $json.message_id, sender: $json.sender, description: $json.description, confidence: $json.confidence } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "9628d5ea-9d93-44d3-8d4c-0719bf922ec0",
+      "name": "Send Task to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2192,
+        144
+      ],
+      "credentials": {
+        "httpTemplatedCustomAuth": {
+          "id": "x0T0vcbKJHhErVE2",
+          "name": "InBox Webhook Secret (Rida) (rida)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "status-ok",
+              "leftValue": "={{ $json.statusCode >= 200 && $json.statusCode < 300 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e4c08884-ba13-4214-b8bc-0a17d9e9f649",
+      "name": "Supabase Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2416,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nrrKNoleJhYbUT05"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "keyValue": "={{ $json.message_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $json.message_id }}",
+            "status": "={{ $json.ai_error ? \"ai_error\" : \"not_a_task\" }}",
+            "title": "={{ $json.title || \"\" }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "50f31f42-8a50-4791-9da2-6d0a41d23a42",
+      "name": "Mark Handled (Non-Task)",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1968,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nrrKNoleJhYbUT05"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "event_id",
+              "keyValue": "={{ $(\"Build Task Payload\").item.json.message_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $(\"Build Task Payload\").item.json.message_id }}",
+            "status": "sent_to_supabase",
+            "title": "={{ $(\"Build Task Payload\").item.json.title }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d7d5e87e-b994-4f08-8b88-7edbd1c328de",
+      "name": "Mark Processed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "error",
+              "type": "string",
+              "value": "supabase_post_failed"
+            },
+            {
+              "id": "e2",
+              "name": "status_code",
+              "type": "number",
+              "value": "={{ $json.statusCode }}"
+            },
+            {
+              "id": "e3",
+              "name": "response_body",
+              "type": "string",
+              "value": "={{ JSON.stringify($json.body) }}"
+            },
+            {
+              "id": "e4",
+              "name": "message_id",
+              "type": "string",
+              "value": "={{ $(\"Build Task Payload\").item.json.message_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "54d888b8-7bc9-4cf6-984b-91bf27e24193",
+      "name": "Supabase Failure (Not Marked)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2640,
+        240
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Calendar Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Check Already Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Already Processed": {
+      "main": [
+        [
+          {
+            "node": "Is New Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Event": {
+      "main": [
+        [
+          {
+            "node": "Restore Event Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Event Fields": {
+      "main": [
+        [
+          {
+            "node": "AI Task Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Task Detection": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Result": {
+      "main": [
+        [
+          {
+            "node": "Is Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Task": {
+      "main": [
+        [
+          {
+            "node": "Build Task Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Handled (Non-Task)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Task Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Task to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Task to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Supabase Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Success": {
+      "main": [
+        [
+          {
+            "node": "Mark Processed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase Failure (Not Marked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "96132d73-68e1-433d-b4fb-5d1939d6c29e",
+  "meta": {
+    "instanceId": "6d88f1059dffa77f92e7011c8e28d31f6d354c5e7120a3ef28d3d2ef9d000c8c"
+  },
+  "nodeGroups": [
+    {
+      "id": "d6179368-9374-48ec-a7f2-1a06dbcc3b43",
+      "name": "Detect calendar tasks",
+      "nodeIds": [
+        "e0841049-9609-46c5-9c9b-a1f5e7fe3ed2",
+        "580fa23d-7fe8-440c-bb8f-65d4878f536a",
+        "0624222a-2b7a-47e7-9847-e5c8da73cc7c",
+        "ff2c2bac-c42b-489a-a4b6-5204a4be1271",
+        "0e828b51-b93d-482c-82b9-a12ef55f8944",
+        "e7d44684-4274-4293-af48-abbe97c001ec"
+      ],
+      "description": "Polls Google Calendar for new events, skips ones already handled, and uses AI to decide whether each event is an actionable task."
+    },
+    {
+      "id": "4329e126-b052-40d4-b53a-f7fa5a98fbfc",
+      "name": "Deliver detected task",
+      "nodeIds": [
+        "b3ed2109-1d81-4dbe-938f-f66fc3d0917f",
+        "5e480f4f-640f-43f0-b0c0-88321efd4f6a",
+        "9628d5ea-9d93-44d3-8d4c-0719bf922ec0",
+        "e4c08884-ba13-4214-b8bc-0a17d9e9f649",
+        "d7d5e87e-b994-4f08-8b88-7edbd1c328de",
+        "54d888b8-7bc9-4cf6-984b-91bf27e24193",
+        "50f31f42-8a50-4791-9da2-6d0a41d23a42"
+      ],
+      "description": "Sends detected tasks to the InBox app as pending items for the user to confirm or dismiss, then records the event as handled."
+    }
+  ],
+  "id": "QAQafbsGsKro6HAC",
+  "tags": []
+}

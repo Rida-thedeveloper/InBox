@@ -1,0 +1,553 @@
+{
+  "name": "WhatsApp → InBox Task Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-inbox",
+        "options": {}
+      },
+      "id": "3051d5a2-ae5d-4aaa-a13c-3f48e68701c6",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        64
+      ],
+      "webhookId": "2b6609dd-7d60-4537-a816-ef35a5169fd6"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "is-received",
+              "leftValue": "={{ $json.body.event }}",
+              "rightValue": "message_received",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "not-own-message",
+              "leftValue": "={{ $json.body.account_info.user_id }}",
+              "rightValue": "={{ $json.body.sender.attendee_provider_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c400b44c-6c29-45d5-b3bd-0c19b6369a97",
+      "name": "Only New Incoming",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        336,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "text",
+              "name": "message_text",
+              "type": "string",
+              "value": "={{ $json.body.message }}"
+            },
+            {
+              "id": "sname",
+              "name": "sender_name",
+              "type": "string",
+              "value": "={{ $json.body.sender.attendee_name }}"
+            },
+            {
+              "id": "sid",
+              "name": "sender_id",
+              "type": "string",
+              "value": "={{ $json.body.sender.attendee_provider_id }}"
+            },
+            {
+              "id": "chat",
+              "name": "chat_id",
+              "type": "string",
+              "value": "={{ $json.body.chat_id }}"
+            },
+            {
+              "id": "mid",
+              "name": "message_id",
+              "type": "string",
+              "value": "={{ $json.body.message_id }}"
+            },
+            {
+              "id": "ts",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $json.body.timestamp }}"
+            },
+            {
+              "id": "orig",
+              "name": "original_message",
+              "type": "string",
+              "value": "={{ $json.body.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c3378aea-d67c-4c31-9865-48df6cb91abd",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        560,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.6-luna",
+          "cachedResultName": "gpt-5.6-luna"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You analyze a single WhatsApp message and decide whether it contains a real, actionable task for the recipient.\nA task is something the recipient must DO or remember to do: assignments, calls, sending things, meetings, purchases, deadlines, reminders.\nNOT tasks: greetings (\"hi\", \"how are you\"), acknowledgements (\"okay\", \"thanks\"), casual chatting, questions with no action for the recipient, or statements requiring no action.\nOutput ONLY the structured object.\nRules:\n- If it is not a task: is_task=false and all other fields null.\n- If it is a task: is_task=true and fill task_title (short imperative title) and description.\n- due_date: format YYYY-MM-DD. due_time: format HH:MM (24h).\n- NEVER invent a due date or time. If the message gives none, set them to null.\n- Resolve relative words (\"today\", \"tomorrow\", \"Friday\", \"tonight\") using the provided MESSAGE_TIMESTAMP as the reference \"now\". Never use any other clock.\n- priority: one of \"low\", \"medium\", \"high\" (default \"medium\" when it is a task and no urgency is stated)."
+            },
+            {
+              "content": "=MESSAGE_TIMESTAMP: {{ $json.timestamp }}\nMESSAGE_TEXT: {{ $json.message_text }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 500,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_schema",
+              "name": "task_detection",
+              "schema": "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"is_task\":{\"type\":\"boolean\"},\"task_title\":{\"type\":[\"string\",\"null\"]},\"description\":{\"type\":[\"string\",\"null\"]},\"due_date\":{\"type\":[\"string\",\"null\"]},\"due_time\":{\"type\":[\"string\",\"null\"]},\"priority\":{\"type\":[\"string\",\"null\"],\"enum\":[\"low\",\"medium\",\"high\",null]}},\"required\":[\"is_task\",\"task_title\",\"description\",\"due_date\",\"due_time\",\"priority\"]}",
+              "strict": true
+            }
+          }
+        }
+      },
+      "id": "386050be-82ff-4058-b119-d534dddde66e",
+      "name": "AI Task Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        816,
+        160
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "istask",
+              "name": "is_task",
+              "type": "boolean",
+              "value": "={{ $json.output[0].content[0].text.is_task }}"
+            },
+            {
+              "id": "title",
+              "name": "task_title",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.task_title }}"
+            },
+            {
+              "id": "desc",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.description }}"
+            },
+            {
+              "id": "ddate",
+              "name": "due_date",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.due_date }}"
+            },
+            {
+              "id": "dtime",
+              "name": "due_time",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.due_time }}"
+            },
+            {
+              "id": "prio",
+              "name": "priority",
+              "type": "string",
+              "value": "={{ $json.output[0].content[0].text.priority }}"
+            },
+            {
+              "id": "src",
+              "name": "source",
+              "type": "string",
+              "value": "whatsapp"
+            },
+            {
+              "id": "sndr",
+              "name": "sender",
+              "type": "string",
+              "value": "={{ $(\"Extract Message\").item.json.sender_name }}"
+            },
+            {
+              "id": "omsg",
+              "name": "original_message",
+              "type": "string",
+              "value": "={{ $(\"Extract Message\").item.json.original_message }}"
+            },
+            {
+              "id": "chat",
+              "name": "chat_id",
+              "type": "string",
+              "value": "={{ $(\"Extract Message\").item.json.chat_id }}"
+            },
+            {
+              "id": "mid",
+              "name": "message_id",
+              "type": "string",
+              "value": "={{ $(\"Extract Message\").item.json.message_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "69ae5566-9ebf-492b-92fc-e900f5878fc0",
+      "name": "Build Task",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1040,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "is-task-true",
+              "leftValue": "={{ $json.is_task }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "269cba7d-6bcc-4827-ac86-4a14282c7547",
+      "name": "Is Task",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1264,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "whatsapp_tasks",
+        "limit": 1,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "message_id",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Build Task\").item.json.message_id }}"
+            }
+          ]
+        }
+      },
+      "id": "38f07e4d-8631-4ba6-9ebe-d94255731a8c",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        160
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "wA9Lp1txFwN8xUJT",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "no-existing-row",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f2d413da-cf41-4b80-a3d5-8fef0b12ffc1",
+      "name": "Not Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1744,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "whatsapp_tasks",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "task_title",
+              "fieldValue": "={{ $(\"Build Task\").item.json.task_title }}"
+            },
+            {
+              "fieldId": "description",
+              "fieldValue": "={{ $(\"Build Task\").item.json.description }}"
+            },
+            {
+              "fieldId": "due_date",
+              "fieldValue": "={{ $(\"Build Task\").item.json.due_date || null }}"
+            },
+            {
+              "fieldId": "due_time",
+              "fieldValue": "={{ $(\"Build Task\").item.json.due_time || null }}"
+            },
+            {
+              "fieldId": "priority",
+              "fieldValue": "={{ $(\"Build Task\").item.json.priority || \"medium\" }}"
+            },
+            {
+              "fieldId": "source",
+              "fieldValue": "whatsapp"
+            },
+            {
+              "fieldId": "sender",
+              "fieldValue": "={{ $(\"Build Task\").item.json.sender }}"
+            },
+            {
+              "fieldId": "original_message",
+              "fieldValue": "={{ $(\"Build Task\").item.json.original_message }}"
+            },
+            {
+              "fieldId": "chat_id",
+              "fieldValue": "={{ $(\"Build Task\").item.json.chat_id }}"
+            },
+            {
+              "fieldId": "message_id",
+              "fieldValue": "={{ $(\"Build Task\").item.json.message_id }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "pending"
+            }
+          ]
+        }
+      },
+      "id": "cc3f07e7-700e-4022-bb15-1eaff3ed7630",
+      "name": "Insert Task",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        160
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "wA9Lp1txFwN8xUJT",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "Only New Incoming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only New Incoming": {
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "AI Task Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Task Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Build Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Task": {
+      "main": [
+        [
+          {
+            "node": "Is Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Task": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Not Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Insert Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d0b35420-4504-42d2-b869-e797de82affe",
+  "meta": {
+    "instanceId": "ae59b0337b1238d9bf5b241e73c19ae20b99aac0308c08ca3ef3689527a91168"
+  },
+  "nodeGroups": [
+    {
+      "id": "61b31754-115c-43b8-8244-0d69221db3af",
+      "name": "Capture new messages",
+      "nodeIds": [
+        "c400b44c-6c29-45d5-b3bd-0c19b6369a97",
+        "c3378aea-d67c-4c31-9865-48df6cb91abd"
+      ],
+      "description": "Drops reactions/reads and your own sent WhatsApp messages, then pulls out the sender, text, chat, message ID and timestamp"
+    },
+    {
+      "id": "d45c968d-7b41-44b5-abcf-daa3f37a4bd9",
+      "name": "Detect task",
+      "nodeIds": [
+        "386050be-82ff-4058-b119-d534dddde66e",
+        "69ae5566-9ebf-492b-92fc-e900f5878fc0",
+        "269cba7d-6bcc-4827-ac86-4a14282c7547"
+      ],
+      "description": "Sends the message to OpenAI, builds the structured task JSON, and continues only when a real action item is found"
+    },
+    {
+      "id": "b01bdfa8-abb8-45a1-b0ab-1c4de51f64bd",
+      "name": "Save to InBox",
+      "nodeIds": [
+        "38f07e4d-8631-4ba6-9ebe-d94255731a8c",
+        "f2d413da-cf41-4b80-a3d5-8fef0b12ffc1",
+        "cc3f07e7-700e-4022-bb15-1eaff3ed7630"
+      ],
+      "description": "Skips messages already stored, then inserts new tasks into the InBox Supabase whatsapp_tasks table"
+    }
+  ],
+  "id": "ssErgOCiMRQnR9fo",
+  "tags": []
+}
