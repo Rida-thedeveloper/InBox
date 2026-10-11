@@ -149,7 +149,7 @@ export async function syncLocationGeofences(userId, tasks) {
   ]);
   const previousRecords = await loadRecords(userId);
   const previousById = new Map(previousRecords.map((task) => [task.id, task]));
-  const savedLocationTasks = tasks.filter((task) => task.location_enabled).map((task) => {
+  const savedLocationTasks = tasks.filter((task) => task.location_enabled && !task.completed).map((task) => {
     const { resetTriggerState, ...record } = task;
     const previous = previousById.get(task.id);
     if (resetTriggerState || !previous) return { ...record, triggered: resetTriggerState ? false : record.triggered, inside: resetTriggerState ? false : record.inside };

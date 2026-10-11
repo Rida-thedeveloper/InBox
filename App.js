@@ -82,17 +82,35 @@ function AppContent() {
   useEffect(() => {
     let active = true;
     (async () => {
-      const cachedTasks = await loadManualTasks(authUserId);
+      const storedTasks = await loadManualTasks(authUserId);
+      const completedLocalTasks = storedTasks.filter((task) => task.completed);
+      for (const task of completedLocalTasks) {
+        try {
+          await removeManualTask(authUserId, task.id);
+        } catch (error) {
+          console.warn('Could not remove a completed task from local storage:', error?.message || error);
+        }
+      }
+      const cachedTasks = storedTasks.filter((task) => !task.completed);
       let savedTasks = cachedTasks;
       if (authUserId && supabase) {
         try {
           let cloudTasks = await loadCloudManualTasks(authUserId);
-          // Migrate cached tasks and retry any local saves that missed Supabase while offline.
+          const completedCloudTasks = cloudTasks.filter((task) => task.completed);
+          const cleanupResults = await Promise.allSettled(completedCloudTasks.map((task) => (
+            deleteCloudManualTask(authUserId, task.id, { requireMatch: false })
+          )));
+          if (cleanupResults.some((result) => result.status === 'rejected')) {
+            console.warn('Some completed tasks could not be removed from Supabase yet.');
+          }
+          cloudTasks = cloudTasks.filter((task) => !task.completed);
+          // Migrate active cached tasks and retry local saves that missed Supabase while offline.
           const cloudTaskIds = new Set(cloudTasks.map((task) => task.id));
           const unsyncedTasks = cachedTasks.filter((task) => !cloudTaskIds.has(task.id));
           if (unsyncedTasks.length) {
             await Promise.all(unsyncedTasks.map((task) => saveCloudManualTask(authUserId, task)));
             cloudTasks = await loadCloudManualTasks(authUserId);
+            cloudTasks = cloudTasks.filter((task) => !task.completed);
           }
           savedTasks = cloudTasks;
           await Promise.all(cloudTasks.map((task) => saveManualTask(authUserId, task)));
@@ -102,8 +120,8 @@ function AppContent() {
       }
       if (!active) return;
       setTasks((current) => [
-        ...current.filter((task) => !task.id?.startsWith('task-manual-') || task.location_enabled),
-        ...savedTasks,
+        ...current.filter((task) => !task.completed && (!task.id?.startsWith('task-manual-') || task.location_enabled)),
+        ...savedTasks.filter((task) => !task.completed),
       ]);
     })();
     return () => { active = false; };
@@ -121,8 +139,8 @@ function AppContent() {
       const savedTasks = await loadLocationTasks(authUserId);
       if (!active) return;
       setTasks((current) => [
-        ...current.filter((task) => !task.location_enabled),
-        ...savedTasks,
+        ...current.filter((task) => !task.location_enabled && !task.completed),
+        ...savedTasks.filter((task) => !task.completed),
       ]);
       try {
         const result = await syncLocationGeofences(authUserId, savedTasks);
@@ -153,9 +171,18 @@ function AppContent() {
       if (handledLocationActions.current.has(responseId)) return;
       handledLocationActions.current.add(responseId);
       if (action === 'DONE') {
-        const updated = await markLocationTaskDone(authUserId, taskId, tasks);
-        setTasks(updated);
-        await cancelLocationTaskNotifications(taskId);
+        try {
+          const task = tasks.find((item) => item.id === taskId);
+          const updated = await markLocationTaskDone(authUserId, taskId, tasks);
+          setTasks(updated);
+          if (task?.id?.startsWith('task-manual-')) {
+            await deleteCloudManualTask(authUserId, taskId, { requireMatch: false });
+            await removeManualTask(authUserId, taskId);
+          }
+          await cancelLocationTaskNotifications(taskId);
+        } catch (error) {
+          Alert.alert('Could not complete task', error?.message || 'Please try again.');
+        }
       } else if (action === 'SNOOZE') {
         await snoozeLocationTask(taskId, notification.request.content);
       }
@@ -503,36 +530,54 @@ function AppContent() {
     }
   };
 
-  // Toggle task completion
+  // Completing a task removes its persisted record; it stays in this session's Completed list.
   const handleToggleComplete = async (taskId) => {
     const currentTask = tasks.find((task) => task.id === taskId);
-    if (currentTask?.whatsappRemote && !currentTask.completed) {
+    const isCompleting = !currentTask?.completed;
+    if (currentTask?.whatsappRemote && isCompleting) {
       await hideRemoteTaskInApp(currentTask);
       return;
     }
-    if (currentTask?.remote && !currentTask.completed) {
+    if (currentTask?.remote && isCompleting) {
       await hideRemoteTaskInApp(currentTask);
       return;
     }
     const nextTasks = tasks.map((task) => task.id === taskId ? { ...task, completed: !task.completed } : task);
     setTasks(nextTasks);
     const task = nextTasks.find((item) => item.id === taskId);
-    if (task?.id?.startsWith('task-manual-')) {
-      try {
-        if (authUserId) await saveCloudManualTask(authUserId, task);
-        if (!task.location_enabled) await saveManualTask(authUserId, task);
-      } catch (error) {
-        console.error('Could not save manual task completion:', error);
-        Alert.alert('Could not update task', error?.message || 'Please try again.');
-      }
-    }
-    if (task?.location_enabled) {
-      try {
+    if (!task) return;
+
+    try {
+      if (task.id?.startsWith('task-manual-')) {
+        if (isCompleting) {
+          if (!task.location_enabled) await removeManualTask(authUserId, taskId);
+          if (task.location_enabled) await syncLocationGeofences(authUserId, nextTasks);
+          if (authUserId) await deleteCloudManualTask(authUserId, taskId, { requireMatch: false });
+        } else {
+          if (authUserId) await saveCloudManualTask(authUserId, task);
+          if (!task.location_enabled) await saveManualTask(authUserId, task);
+          if (task.location_enabled) await syncLocationGeofences(authUserId, nextTasks);
+        }
+      } else if (task.location_enabled) {
         await syncLocationGeofences(authUserId, nextTasks);
-        if (task.completed) await cancelLocationTaskNotifications(taskId);
-      } catch (error) {
-        Alert.alert('Location reminder update failed', error?.message || 'Please try again.');
       }
+    } catch (error) {
+      setTasks(tasks);
+      if (isCompleting && task.id?.startsWith('task-manual-') && !task.location_enabled) {
+        try { await saveManualTask(authUserId, currentTask); } catch { /* keep the completion error visible */ }
+      }
+      if (task.location_enabled) {
+        try { await syncLocationGeofences(authUserId, tasks); } catch { /* the saved reminder will retry on refresh */ }
+      }
+      console.error('Could not update task completion:', error);
+      Alert.alert('Could not update task', error?.message || 'Please try again.');
+      return;
+    }
+
+    if (isCompleting && task.location_enabled) {
+      cancelLocationTaskNotifications(taskId).catch((error) => {
+        console.warn('Could not cancel completed location reminders:', error?.message || error);
+      });
     }
   };
 

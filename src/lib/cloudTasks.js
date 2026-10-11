@@ -24,7 +24,7 @@ export async function saveCloudManualTask(userId, task) {
   if (error) throw error;
 }
 
-export async function deleteCloudManualTask(userId, taskId) {
+export async function deleteCloudManualTask(userId, taskId, { requireMatch = true } = {}) {
   if (!supabase || !userId) throw new Error('Sign in to delete this task from Supabase.');
   const { data, error } = await supabase.from(TABLE)
     .delete()
@@ -32,7 +32,7 @@ export async function deleteCloudManualTask(userId, taskId) {
     .eq('id', String(taskId))
     .select('id');
   if (error) throw error;
-  if (!data?.some((row) => row.id === String(taskId))) {
+  if (requireMatch && !data?.some((row) => row.id === String(taskId))) {
     throw new Error('Supabase did not confirm deleting this task. Check that the database migration has been applied.');
   }
 }
