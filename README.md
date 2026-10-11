@@ -44,6 +44,10 @@ Rather than managing tasks across fragmented apps, **InBox** combines task signa
 
 ---
 
+## Public Web App
+
+Open InBox on mobile data or desktop at [https://rida-thedeveloper.github.io/InBox/](https://rida-thedeveloper.github.io/InBox/). The `Deploy InBox web` GitHub Actions workflow rebuilds and publishes the Expo web app whenever changes are pushed to `main`. Supabase OAuth redirects are configured for this hosted URL.
+
 ## 🛠️ How to Run the App
 
 ```bash

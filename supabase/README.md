@@ -33,7 +33,7 @@ npx supabase functions deploy n8n-gmail-detection --no-verify-jwt
 
 The callback is the only unauthenticated function because Google redirects the browser there without an InBox session. It validates a short-lived, one-time, hashed OAuth state before using the code. All other functions require the signed-in user's Supabase JWT.
 
-The Expo redirect allowlist accepts `inboxapp://integrations` and `http://localhost:8081/` for local web preview. Add an exact production app/web redirect to `allowedAppRedirect` before shipping a production build.
+The Supabase Auth Site URL is `https://rida-thedeveloper.github.io/InBox/`; the redirect allowlist also retains `http://192.168.100.16:8083/` and allows the hosted callback. Web sign-in must be started from the public HTTPS site for mobile data. The Gmail-connect function accepts this production web URL in `allowedAppRedirect`.
 
 ## n8n: send a detected Gmail task into InBox
 

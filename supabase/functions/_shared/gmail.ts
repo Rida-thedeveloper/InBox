@@ -93,7 +93,9 @@ export function allowedAppRedirect(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   try {
     const url = new URL(value);
-    return url.origin === 'http://localhost:8081' && url.pathname === '/' && !url.username && !url.password;
+    const isLocalPreview = url.origin === 'http://localhost:8081' && url.pathname === '/';
+    const isProductionWeb = url.origin === 'https://rida-thedeveloper.github.io' && url.pathname.replace(/\/+$/, '') === '/InBox';
+    return (isLocalPreview || isProductionWeb) && !url.username && !url.password;
   } catch {
     return false;
   }

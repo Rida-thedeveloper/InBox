@@ -26,7 +26,7 @@ export default function AuthScreen({ onAuthenticated }) {
   useEffect(() => {
     if (Platform.OS !== 'web') return;
 
-    const params = new URLSearchParams(window.location.search);
+    const params = new window.URLSearchParams(window.location.search);
     const oauthError = params.get('error_code') || params.get('error');
     if (!oauthError) return;
 

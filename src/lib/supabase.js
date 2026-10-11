@@ -40,7 +40,9 @@ const pendingCodeExchanges = new Map();
 export function getAuthRedirectUri(path = '') {
   if (Platform.OS === 'web') {
     const cleanPath = path.replace(/^\/+/, '');
-    return cleanPath ? `${window.location.origin}/${cleanPath}` : `${window.location.origin}/`;
+    const currentUrl = new window.URL(window.location.href);
+    const basePath = currentUrl.pathname.endsWith('/') ? currentUrl.pathname : `${currentUrl.pathname}/`;
+    return new window.URL(cleanPath, `${currentUrl.origin}${basePath}`).toString();
   }
   return AuthSession.makeRedirectUri({ scheme: 'inboxapp', path: path || 'auth/callback' });
 }
