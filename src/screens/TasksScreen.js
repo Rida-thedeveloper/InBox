@@ -126,7 +126,7 @@ export default function TasksScreen({
             activeOpacity={0.8}
           >
             <Ionicons name="add" size={18} color="#FFFFFF" />
-            <Text style={styles.addTopBtnText}>+ Add Task</Text>
+            <Text style={styles.addTopBtnText}>Add Task</Text>
           </TouchableOpacity>
         </View>
 
