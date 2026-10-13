@@ -8,6 +8,8 @@ import {
   Alert,
   ActivityIndicator,
   AppState,
+  Pressable,
+  Text,
 } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -65,6 +67,7 @@ function AppContent() {
   const [taskToEdit, setTaskToEdit] = useState(null);
   const [gmailConnection, setGmailConnection] = useState({ connected: false, email: null });
   const [gmailBusy, setGmailBusy] = useState(false);
+  const [undoToast, setUndoToast] = useState(null);
   const authUserId = authSession?.user?.id;
   const [inboxRefreshKey, setInboxRefreshKey] = useState(0);
   const handledLocationActions = useRef(new Set());
@@ -72,7 +75,43 @@ function AppContent() {
   const approvedWhatsAppTaskIds = useRef(new Set());
   const dismissedWhatsAppTaskIds = useRef(new Set());
   const hiddenRemoteTaskIds = useRef(new Set());
+  const pendingUndo = useRef(null);
+  const undoTimer = useRef(null);
   const permissionAlertShown = useRef(false);
+
+  const offerUndo = (message, undo, expire) => {
+    if (undoTimer.current) globalThis.clearTimeout(undoTimer.current);
+    const previous = pendingUndo.current;
+    if (previous?.expire) Promise.resolve(previous.expire()).catch((error) => console.warn('Could not finish previous removal:', error?.message || error));
+    pendingUndo.current = { undo, expire };
+    setUndoToast(message);
+    undoTimer.current = globalThis.setTimeout(async () => {
+      const action = pendingUndo.current;
+      pendingUndo.current = null;
+      undoTimer.current = null;
+      setUndoToast(null);
+      if (action?.expire) {
+        try { await action.expire(); } catch (error) { console.warn('Could not finish removal:', error?.message || error); }
+      }
+    }, 8000);
+  };
+
+  const runUndo = async () => {
+    const action = pendingUndo.current;
+    if (!action) return;
+    if (undoTimer.current) globalThis.clearTimeout(undoTimer.current);
+    pendingUndo.current = null;
+    undoTimer.current = null;
+    setUndoToast(null);
+    try { await action.undo(); } catch (error) {
+      console.error('Could not undo the removal:', error);
+      Alert.alert('Could not undo', error?.message || 'Please try again.');
+    }
+  };
+
+  useEffect(() => () => {
+    if (undoTimer.current) globalThis.clearTimeout(undoTimer.current);
+  }, []);
 
   useEffect(() => {
     setTasks([]);
@@ -538,6 +577,7 @@ function AppContent() {
       .from('pending_inbox_detections')
       .delete()
       .eq('id', taskId)
+      .eq('user_id', authUserId)
       .select('id');
     if (error) {
       console.error('[Detection task DELETE] Supabase error', {
@@ -554,6 +594,19 @@ function AppContent() {
     if (!data?.some((row) => row.id === taskId)) {
       throw new Error('Supabase did not confirm deleting this task. It is still available in the database.');
     }
+  };
+
+  const setWhatsAppTaskStatus = async (taskId, status) => {
+    const { data, error } = await supabase.functions.invoke('whatsapp-task-status', {
+      body: { taskId, status },
+    });
+    if (error || !data?.ok) throw new Error(data?.error || error?.message || 'Could not update the WhatsApp task.');
+  };
+
+  const setRemoteDetectionStatus = async (taskId, status) => {
+    const { error } = await supabase.from('pending_inbox_detections')
+      .update({ status }).eq('id', taskId).eq('user_id', authUserId);
+    if (error) throw error;
   };
 
   const hideRemoteTaskInApp = async (task) => {
@@ -725,9 +778,10 @@ function AppContent() {
   const handleDeleteTask = async (taskId) => {
     const task = tasks.find((item) => item.id === taskId);
     if (task?.whatsappRemote || task?.remote) {
+      const restoreStatus = task.status || 'approved';
       try {
-        if (task.whatsappRemote) await deleteWhatsAppTaskFromDatabase(taskId);
-        else await deleteRemoteDetectionTask(taskId);
+        if (task.whatsappRemote) await setWhatsAppTaskStatus(taskId, 'dismissed');
+        else await setRemoteDetectionStatus(taskId, 'dismissed');
       } catch (error) {
         Alert.alert('Could not delete task', error?.message || 'Supabase could not delete this task. Please try again.');
         return;
@@ -741,7 +795,20 @@ function AppContent() {
       } catch (error) {
         console.warn('Deleted task could not be added to the local hidden-task cache:', error?.message || error);
       }
-      Alert.alert('Task Deleted', 'The task has been removed from InBox and Supabase.');
+      offerUndo('Task deleted', async () => {
+        if (task.whatsappRemote) {
+          await setWhatsAppTaskStatus(taskId, restoreStatus);
+          deletedWhatsAppTaskIds.current.delete(taskId);
+        } else {
+          await setRemoteDetectionStatus(taskId, restoreStatus);
+        }
+        hiddenRemoteTaskIds.current.delete(taskId);
+        await saveHiddenRemoteTaskIds(authUserId, [...hiddenRemoteTaskIds.current]);
+        setTasks((current) => [task, ...current.filter((item) => item.id !== taskId)]);
+      }, async () => {
+        if (task.whatsappRemote) await deleteWhatsAppTaskFromDatabase(taskId);
+        else await deleteRemoteDetectionTask(taskId);
+      });
       return;
     }
     try {
@@ -765,7 +832,15 @@ function AppContent() {
         Alert.alert('Could not remove location reminder', error?.message || 'Please try again.');
       }
     }
-    Alert.alert('Task Deleted', 'The task has been removed from InBox.');
+    offerUndo('Task deleted', async () => {
+      if (task?.id?.startsWith('task-manual-')) {
+        await saveManualTask(authUserId, task);
+        if (authUserId) await saveCloudManualTask(authUserId, task);
+      }
+      const restored = [task, ...tasks.filter((item) => item.id !== taskId)];
+      setTasks(restored);
+      if (task?.location_enabled) await syncLocationGeofences(authUserId, restored);
+    });
   };
 
   // Open edit modal
@@ -839,11 +914,10 @@ function AppContent() {
   const handleDismissDetection = async (detectionId) => {
     const detection = detections.find((item) => item.id === detectionId);
     if (detection?.whatsappRemote) {
-      const { data, error } = await supabase.functions.invoke('whatsapp-task-status', {
-        body: { taskId: detectionId, status: 'dismissed' },
-      });
-      if (error || !data?.ok) {
-        Alert.alert('Could not dismiss WhatsApp detection', data?.error || error?.message || 'Please try again.');
+      try {
+        await setWhatsAppTaskStatus(detectionId, 'dismissed');
+      } catch (error) {
+        Alert.alert('Could not dismiss WhatsApp detection', error?.message || 'Please try again.');
         return;
       }
       dismissedWhatsAppTaskIds.current.add(detectionId);
@@ -852,13 +926,26 @@ function AppContent() {
       });
     } else if (detection?.remote && supabase) {
       const { error } = await supabase.from('pending_inbox_detections')
-        .update({ status: 'dismissed' }).eq('id', detectionId);
+        .update({ status: 'dismissed' }).eq('id', detectionId).eq('user_id', authUserId);
       if (error) {
         Alert.alert('Could not dismiss detection', error.message);
         return;
       }
     }
     setDetections(prev => prev.filter(d => d.id !== detectionId));
+    offerUndo('Detection discarded', async () => {
+      if (detection?.whatsappRemote) {
+        await setWhatsAppTaskStatus(detectionId, 'pending');
+        dismissedWhatsAppTaskIds.current.delete(detectionId);
+        await saveDismissedWhatsAppTaskIds(authUserId, [...dismissedWhatsAppTaskIds.current]);
+      } else if (detection?.remote) {
+        await setRemoteDetectionStatus(detectionId, 'pending');
+      }
+      setDetections((current) => [detection, ...current.filter((item) => item.id !== detectionId)]);
+    }, async () => {
+      if (detection?.whatsappRemote) await deleteWhatsAppTaskFromDatabase(detectionId);
+      else if (detection?.remote) await deleteRemoteDetectionTask(detectionId);
+    });
   };
 
   // Handle task actions (Join Zoom, Navigate, etc.)
@@ -1082,6 +1169,15 @@ function AppContent() {
         {renderActiveScreen()}
       </View>
 
+      {undoToast && (
+        <View style={[styles.undoToast, { backgroundColor: darkMode ? '#243249' : '#172033' }]} accessibilityLiveRegion="polite">
+          <Text style={styles.undoToastText}>{undoToast}</Text>
+          <Pressable onPress={runUndo} accessibilityRole="button" accessibilityLabel="Undo removal" hitSlop={10}>
+            <Text style={styles.undoButtonText}>UNDO</Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* Floating Add Task + Bottom Tab Navigation */}
       <BottomNavigation
         currentTab={currentTab}
@@ -1124,5 +1220,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
+  },
+  undoToast: {
+    position: 'absolute',
+    zIndex: 20,
+    elevation: 12,
+    left: 16,
+    right: 16,
+    bottom: 100,
+    minHeight: 54,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  undoToastText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    flexShrink: 1,
+    marginRight: 16,
+  },
+  undoButtonText: {
+    color: '#93C5FD',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
 });

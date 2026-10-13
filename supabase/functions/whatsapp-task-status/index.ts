@@ -19,8 +19,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const taskId = typeof body.taskId === 'string' ? body.taskId.trim() : '';
     const status = body.status;
-    if (!taskId || !['approved', 'dismissed'].includes(status)) {
-      return jsonResponse({ error: 'A task ID and approved/dismissed status are required.' }, 400);
+    if (!taskId || !['pending', 'approved', 'dismissed'].includes(status)) {
+      return jsonResponse({ error: 'A task ID and pending/approved/dismissed status are required.' }, 400);
     }
 
     const { data, error } = await createAdminClient()
@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
       .update({ status })
       .eq('id', taskId)
       .eq('user_id', user.id)
-      .in('status', ['pending', 'approved'])
+      .in('status', ['pending', 'approved', 'dismissed'])
       .select('id,status')
       .maybeSingle();
     if (error) throw new Error('Could not update this WhatsApp task.');
