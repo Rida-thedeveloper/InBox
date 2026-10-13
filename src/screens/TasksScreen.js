@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -34,6 +34,9 @@ export default function TasksScreen({
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Study' | 'Work' | 'Personal'
   const [selectedPriority, setSelectedPriority] = useState('all'); // 'all' | 'high' | 'medium' | 'low'
   const [selectedTaskForDetail, setSelectedTaskForDetail] = useState(null);
+  const [highlightedTaskId, setHighlightedTaskId] = useState(null);
+  const [cardPositions, setCardPositions] = useState({});
+  const listRef = useRef(null);
   const today = new Date().toISOString().slice(0, 10);
   const isToday = (task) => task.dueCategory === 'today' || task.date === today || (task.dueTime && task.dueTime.toLowerCase().includes('today'));
   const isUpcoming = (task) => task.dueCategory === 'upcoming' || (task.date && task.date > today) || (task.dueTime && task.dueTime.toLowerCase().includes('tomorrow'));
@@ -43,12 +46,17 @@ export default function TasksScreen({
   };
 
   useEffect(() => {
-    if (!initialTaskId) return;
-    const targetTask = tasks.find((task) => task.id === initialTaskId);
-    if (!targetTask) return;
-    setSelectedTaskForDetail(targetTask);
+    if (!initialTaskId || cardPositions[initialTaskId] === undefined) return;
+    listRef.current?.scrollTo({ y: Math.max(0, cardPositions[initialTaskId] - 12), animated: true });
+    setHighlightedTaskId(initialTaskId);
     onTaskFocused?.();
-  }, [initialTaskId, tasks, onTaskFocused]);
+  }, [initialTaskId, cardPositions, onTaskFocused]);
+
+  useEffect(() => {
+    if (!highlightedTaskId) return undefined;
+    const timeout = globalThis.setTimeout(() => setHighlightedTaskId(null), 2400);
+    return () => globalThis.clearTimeout(timeout);
+  }, [highlightedTaskId]);
 
   const tabs = [
     { id: 'all', label: 'All', count: tasks.length },
@@ -262,6 +270,7 @@ export default function TasksScreen({
 
       {/* Task List */}
       <ScrollView 
+        ref={listRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
       >
@@ -299,7 +308,15 @@ export default function TasksScreen({
             return (
               <View
                 key={task.id}
-                style={[styles.taskCard, { backgroundColor: theme.cardBackground, borderColor: theme.border }, isDone && (darkMode ? { backgroundColor: theme.surfaceVariant } : styles.taskCardDone)]}
+                onLayout={(event) => setCardPositions((current) => ({ ...current, [task.id]: event.nativeEvent.layout.y }))}
+                style={[
+                  styles.taskCard,
+                  { backgroundColor: theme.cardBackground, borderColor: theme.border },
+                  isDone && (darkMode ? { backgroundColor: theme.surfaceVariant } : styles.taskCardDone),
+                  highlightedTaskId === task.id && (darkMode
+                    ? { backgroundColor: '#1E3A5F', borderColor: '#60A5FA', borderWidth: 2 }
+                    : { backgroundColor: '#EFF6FF', borderColor: '#2563EB', borderWidth: 2 }),
+                ]}
               >
                 {/* Checkbox */}
                 <TouchableOpacity 

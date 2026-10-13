@@ -198,7 +198,7 @@ export default function HomeScreen({
                   key={task.id} 
                   task={task} 
                   onToggleComplete={onToggleComplete}
-                  onPress={() => onNavigateToTab('tasks', null, 'today', task.id)}
+                  onPress={() => onNavigateToTab('tasks', null, 'all', task.id)}
                   onActionPress={onTaskAction}
                 />
               ))
@@ -227,7 +227,7 @@ export default function HomeScreen({
                   key={task.id} 
                   task={task} 
                   onToggleComplete={onToggleComplete}
-                  onPress={() => onNavigateToTab('tasks', null, 'upcoming', task.id)}
+                  onPress={() => onNavigateToTab('tasks', null, 'all', task.id)}
                   onActionPress={onTaskAction}
                 />
               ))}

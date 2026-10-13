@@ -1065,7 +1065,7 @@ function AppContent() {
             tasks={tasks}
             initialTab={taskTabFilter}
             initialTaskId={focusTaskId}
-            onTaskFocused={() => setFocusTaskId(null)}
+            onTaskFocused={setFocusTaskId}
             user={userProfile}
             onToggleComplete={handleToggleComplete}
             onEditTask={handleEditTask}
