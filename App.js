@@ -1096,7 +1096,7 @@ function AppContent() {
                 dueCategory: 'today',
                 date: new Date().toISOString().split('T')[0],
                 completed: false,
-                priority: 'medium',
+                priority: reminder.priority || 'medium',
                 createdAt: new Date().toISOString(),
                 location: {
                   placeName: reminder.placeName,
@@ -1118,6 +1118,7 @@ function AppContent() {
                 title: reminder.title,
                 description: reminder.description || `When near ${reminder.placeName}, InBox will remind you.`,
                 category: reminder.category || 'Personal',
+                priority: reminder.priority || existingTask.priority || 'medium',
                 tag: reminder.placeName,
                 dueTime: `Location Reminder (${reminder.radius})`,
                 location: { ...existingTask.location, placeName: reminder.placeName, radius: reminder.radius },

@@ -26,6 +26,7 @@ export default function AddLocationReminderModal({
   const [radius, setRadius] = useState('500 m'); // '500 m' | '1 km' | '2 km'
   const [notes, setNotes] = useState('');
   const [category, setCategory] = useState('General');
+  const [priority, setPriority] = useState('medium');
 
   useEffect(() => {
     if (reminderToEdit) {
@@ -34,6 +35,7 @@ export default function AddLocationReminderModal({
       setRadius(reminderToEdit.radius || '500 m');
       setNotes(reminderToEdit.description || '');
       setCategory(reminderToEdit.category || 'General');
+      setPriority(String(reminderToEdit.priority || 'medium').toLowerCase());
     } else {
       resetForm();
     }
@@ -45,6 +47,7 @@ export default function AddLocationReminderModal({
     setRadius('500 m');
     setNotes('');
     setCategory('General');
+    setPriority('medium');
   };
 
   const handleSave = async () => {
@@ -59,6 +62,7 @@ export default function AddLocationReminderModal({
       placeName: placeName.trim(),
       radius: radius,
       category: category,
+      priority,
       active: true,
       description: notes.trim(),
     };
@@ -135,6 +139,36 @@ export default function AddLocationReminderModal({
                   value={placeName}
                   onChangeText={setPlaceName}
                 />
+              </View>
+            </View>
+
+            {/* PRIORITY */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, darkMode && { color: theme.textSecondary }]}>PRIORITY</Text>
+              <View style={styles.priorityRow}>
+                {[
+                  { id: 'low', label: 'Low', color: '#15803D', background: '#DCFCE7' },
+                  { id: 'medium', label: 'Medium', color: '#B45309', background: '#FEF3C7' },
+                  { id: 'high', label: 'High', color: '#B91C1C', background: '#FEE2E2' },
+                ].map((item) => {
+                  const selected = priority === item.id;
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => setPriority(item.id)}
+                      style={[
+                        styles.priorityPill,
+                        { backgroundColor: darkMode ? theme.surfaceVariant : '#FFFFFF', borderColor: darkMode ? theme.border : '#CBD5E1' },
+                        selected && { backgroundColor: darkMode ? `${item.color}33` : item.background, borderColor: item.color },
+                      ]}
+                    >
+                      <View style={[styles.priorityDot, { backgroundColor: item.color }]} />
+                      <Text style={[styles.priorityText, { color: theme.textPrimary }, selected && { color: item.color, fontWeight: '800' }]}>{item.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
 
@@ -319,6 +353,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: 6,
   },
+  priorityRow: { flexDirection: 'row', gap: 8 },
+  priorityPill: { flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  priorityDot: { width: 8, height: 8, borderRadius: 4 },
+  priorityText: { fontSize: 12, fontWeight: '600' },
   textInput: {
     backgroundColor: '#F8FAFC',
     borderWidth: 1,

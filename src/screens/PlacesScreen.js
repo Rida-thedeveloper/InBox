@@ -108,6 +108,12 @@ export default function PlacesScreen({
 
         {reminders.map((item) => {
           const isFuel = item.category === 'Fuel' || item.title.toLowerCase().includes('petrol');
+          const priority = String(item.priority || 'medium').toLowerCase();
+          const priorityStyle = priority === 'high'
+            ? { color: darkMode ? '#FCA5A5' : '#B91C1C', background: darkMode ? '#451A1A' : '#FEE2E2' }
+            : priority === 'low'
+              ? { color: darkMode ? '#86EFAC' : '#15803D', background: darkMode ? '#123322' : '#DCFCE7' }
+              : { color: darkMode ? '#FCD34D' : '#B45309', background: darkMode ? '#3D2D13' : '#FEF3C7' };
           return (
             <View key={item.id} style={[styles.reminderCard, { backgroundColor: theme.cardBackground, borderColor: theme.border }, !item.active && styles.reminderCardPaused, darkMode && !item.active && { opacity: 0.7 }]}>
               
@@ -147,6 +153,9 @@ export default function PlacesScreen({
                   <View style={styles.distanceStatusRow}>
                     <View style={[styles.statusBullet, { backgroundColor: item.active ? '#10B981' : '#94A3B8' }]} />
                     <Text style={styles.distanceStatusText}>{item.active ? 'Enabled' : 'Paused'}</Text>
+                    <View style={[styles.priorityBadge, { backgroundColor: priorityStyle.background }]}>
+                      <Text style={[styles.priorityBadgeText, { color: priorityStyle.color }]}>{priority.toUpperCase()}</Text>
+                    </View>
                   </View>
                 </View>
               </View>
@@ -527,6 +536,8 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontWeight: '500',
   },
+  priorityBadge: { marginLeft: 4, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3 },
+  priorityBadgeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   cardActionsRow: {
     flexDirection: 'row',
     gap: 8,
