@@ -125,6 +125,8 @@ export default function HomeScreen({
         onSelectFilter={(filter) => {
           if (filter === 'pending') {
             onNavigateToTab('detections');
+          } else if (filter === 'today' || filter === 'upcoming') {
+            onNavigateToTab('tasks', null, filter);
           } else {
             setActiveFilter(filter);
           }
@@ -168,7 +170,13 @@ export default function HomeScreen({
         <>
           {/* Section 1: Today's Schedule */}
           <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeaderRow}>
+            <TouchableOpacity
+              style={styles.sectionHeaderRow}
+              onPress={() => onNavigateToTab('tasks', null, 'today')}
+              accessibilityRole="button"
+              accessibilityLabel="Open today's tasks"
+              activeOpacity={0.75}
+            >
               <View style={styles.sectionTitleWithDot}>
                 <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Today's Schedule</Text>
                 <View style={styles.redActiveDot} />
@@ -176,7 +184,7 @@ export default function HomeScreen({
               <Text style={[styles.sectionDueCount, { color: theme.textSecondary }]}>
                 {todayTasks.length} Tasks Due
               </Text>
-            </View>
+            </TouchableOpacity>
 
             {todayTasks.length === 0 ? (
               <View style={[styles.emptyCard, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}>
@@ -199,15 +207,19 @@ export default function HomeScreen({
           {/* Section 2: Upcoming Tasks */}
           {upcomingTasks.length > 0 && (
             <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeaderRow}>
+              <TouchableOpacity
+                style={styles.sectionHeaderRow}
+                onPress={() => onNavigateToTab('tasks', null, 'upcoming')}
+                accessibilityRole="button"
+                accessibilityLabel="Open upcoming tasks"
+                activeOpacity={0.75}
+              >
                 <View style={styles.sectionTitleWithDot}>
                   <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Upcoming</Text>
                   <View style={[styles.redActiveDot, { backgroundColor: '#3B82F6' }]} />
                 </View>
-                <TouchableOpacity onPress={() => onNavigateToTab('tasks')}>
-                  <Text style={[styles.seeAllText, { color: theme.primary }]}>View all</Text>
-                </TouchableOpacity>
-              </View>
+                <Text style={[styles.seeAllText, { color: theme.primary }]}>View all</Text>
+              </TouchableOpacity>
 
               {upcomingTasks.map(task => (
                 <TaskCard 

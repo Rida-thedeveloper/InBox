@@ -23,10 +23,11 @@ export default function TasksScreen({
   onEditTask, 
   onDeleteTask, 
   onAddTaskPress,
+  initialTab = 'all',
   user,
 }) {
   const { darkMode, theme } = useTheme();
-  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'today' | 'upcoming' | 'completed'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'all' | 'today' | 'upcoming' | 'completed'
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Study' | 'Work' | 'Personal'
   const [selectedPriority, setSelectedPriority] = useState('all'); // 'all' | 'high' | 'medium' | 'low'
