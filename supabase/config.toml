@@ -12,3 +12,6 @@ verify_jwt = true
 
 [functions.n8n-gmail-detection]
 verify_jwt = false
+
+[functions.whatsapp-task-status]
+verify_jwt = true

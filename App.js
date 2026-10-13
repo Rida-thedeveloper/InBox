@@ -230,7 +230,8 @@ function AppContent() {
   useEffect(() => {
     if (!authUserId || !supabase) return undefined;
     let active = true;
-    const loadDetections = async () => {
+    let latestRefreshId = 0;
+    const loadDetections = async (refreshId) => {
       const [approvedIds, dismissedIds, hiddenIds] = await Promise.all([
         loadApprovedWhatsAppTaskIds(authUserId),
         loadDismissedWhatsAppTaskIds(authUserId),
@@ -245,7 +246,11 @@ function AppContent() {
         .eq('user_id', authUserId)
         .in('status', ['pending', 'approved'])
         .order('created_at', { ascending: false });
-      if (!active || error || !data) return;
+      if (!active || refreshId !== latestRefreshId) return;
+      if (error || !data) {
+        console.warn('Could not load detections from Supabase:', error?.message || 'No data returned.');
+        return;
+      }
       const pendingRows = data.filter((row) => row.status === 'pending');
       const approvedRows = data.filter((row) => row.status === 'approved' && !hiddenRemoteTaskIds.current.has(row.id));
       const cloudDetections = pendingRows
@@ -290,13 +295,15 @@ function AppContent() {
       const { data: whatsappRows, error: whatsappError } = await supabase
         .from('whatsapp_tasks')
         .select('id,user_id,task_title,description,due_date,due_time,priority,source,sender,original_message,chat_id,message_id,status,created_at')
-        .eq('status', 'pending')
+        .in('status', ['pending', 'approved'])
+        .eq('user_id', authUserId)
         .order('created_at', { ascending: false });
+      if (!active || refreshId !== latestRefreshId) return;
       if (whatsappError) console.warn('Could not load WhatsApp tasks:', whatsappError.message);
       const whatsappTasks = (whatsappRows || [])
-        .filter((row) => !deletedWhatsAppTaskIds.current.has(row.id)
-          && !hiddenRemoteTaskIds.current.has(row.id)
-          && approvedWhatsAppTaskIds.current.has(row.id))
+        .filter((row) => row.status === 'approved'
+          && !deletedWhatsAppTaskIds.current.has(row.id)
+          && !hiddenRemoteTaskIds.current.has(row.id))
         .map((row) => {
         const date = typeof row.due_date === 'string' ? row.due_date.slice(0, 10) : null;
         const dueTime = getWhatsAppScheduleLabel(date, row.due_time, row.description, row.original_message);
@@ -323,7 +330,8 @@ function AppContent() {
         };
         });
       const whatsappDetections = (whatsappRows || [])
-        .filter((row) => !deletedWhatsAppTaskIds.current.has(row.id)
+        .filter((row) => row.status === 'pending'
+          && !deletedWhatsAppTaskIds.current.has(row.id)
           && !hiddenRemoteTaskIds.current.has(row.id)
           && !approvedWhatsAppTaskIds.current.has(row.id)
           && !dismissedWhatsAppTaskIds.current.has(row.id))
@@ -371,7 +379,8 @@ function AppContent() {
       });
     };
     const refreshDetections = () => {
-      loadDetections().catch((error) => {
+      latestRefreshId += 1;
+      loadDetections(latestRefreshId).catch((error) => {
         console.warn('Could not refresh detections:', error?.message || error);
       });
     };
@@ -391,7 +400,7 @@ function AppContent() {
         filter: `user_id=eq.${authUserId}`,
       }, refreshDetections)
       .subscribe();
-    const refreshTimer = globalThis.setInterval(refreshDetections, 15000);
+    const refreshTimer = globalThis.setInterval(refreshDetections, 5000);
     const appStateSubscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') refreshDetections();
     });
@@ -405,6 +414,7 @@ function AppContent() {
     }
     return () => {
       active = false;
+      latestRefreshId += 1;
       globalThis.clearInterval(refreshTimer);
       appStateSubscription.remove();
       if (Platform.OS === 'web') {
@@ -773,15 +783,17 @@ function AppContent() {
   // Approve AI detected task -> moves to tasks list
   const handleApproveDetection = async (detection) => {
     if (detection.whatsappRemote) {
-      const previousIds = [...approvedWhatsAppTaskIds.current];
-      approvedWhatsAppTaskIds.current.add(detection.id);
-      try {
-        await saveApprovedWhatsAppTaskIds(authUserId, [...approvedWhatsAppTaskIds.current]);
-      } catch (error) {
-        approvedWhatsAppTaskIds.current = new Set(previousIds);
-        Alert.alert('Could not confirm WhatsApp task', error?.message || 'Please try again.');
+      const { data, error } = await supabase.functions.invoke('whatsapp-task-status', {
+        body: { taskId: detection.id, status: 'approved' },
+      });
+      if (error || !data?.ok) {
+        Alert.alert('Could not confirm WhatsApp task', data?.error || error?.message || 'Please try again.');
         return;
       }
+      approvedWhatsAppTaskIds.current.add(detection.id);
+      saveApprovedWhatsAppTaskIds(authUserId, [...approvedWhatsAppTaskIds.current]).catch((storageError) => {
+        console.warn('Could not update the local WhatsApp approval cache:', storageError?.message || storageError);
+      });
     } else if (detection.remote && supabase) {
       const { error } = await supabase.from('pending_inbox_detections')
         .update({ status: 'approved' }).eq('id', detection.id);
@@ -827,15 +839,17 @@ function AppContent() {
   const handleDismissDetection = async (detectionId) => {
     const detection = detections.find((item) => item.id === detectionId);
     if (detection?.whatsappRemote) {
-      const previousIds = [...dismissedWhatsAppTaskIds.current];
-      dismissedWhatsAppTaskIds.current.add(detectionId);
-      try {
-        await saveDismissedWhatsAppTaskIds(authUserId, [...dismissedWhatsAppTaskIds.current]);
-      } catch (error) {
-        dismissedWhatsAppTaskIds.current = new Set(previousIds);
-        Alert.alert('Could not dismiss WhatsApp detection', error?.message || 'Please try again.');
+      const { data, error } = await supabase.functions.invoke('whatsapp-task-status', {
+        body: { taskId: detectionId, status: 'dismissed' },
+      });
+      if (error || !data?.ok) {
+        Alert.alert('Could not dismiss WhatsApp detection', data?.error || error?.message || 'Please try again.');
         return;
       }
+      dismissedWhatsAppTaskIds.current.add(detectionId);
+      saveDismissedWhatsAppTaskIds(authUserId, [...dismissedWhatsAppTaskIds.current]).catch((storageError) => {
+        console.warn('Could not update the local WhatsApp dismissal cache:', storageError?.message || storageError);
+      });
     } else if (detection?.remote && supabase) {
       const { error } = await supabase.from('pending_inbox_detections')
         .update({ status: 'dismissed' }).eq('id', detectionId);
