@@ -79,6 +79,11 @@ export default function TasksScreen({
   const newestFirstTasks = filteredTasks
     .map((task, index) => ({ task, index, createdAt: Date.parse(task.createdAt || task.created_at || '') }))
     .sort((a, b) => {
+      const priorityRank = { high: 0, medium: 1, low: 2 };
+      const aPriority = priorityRank[String(a.task.priority || 'medium').toLowerCase()] ?? 1;
+      const bPriority = priorityRank[String(b.task.priority || 'medium').toLowerCase()] ?? 1;
+      if (Boolean(a.task.completed) !== Boolean(b.task.completed)) return Number(a.task.completed) - Number(b.task.completed);
+      if (!a.task.completed && aPriority !== bPriority) return aPriority - bPriority;
       const aTime = Number.isNaN(a.createdAt) ? 0 : a.createdAt;
       const bTime = Number.isNaN(b.createdAt) ? 0 : b.createdAt;
       return bTime - aTime || a.index - b.index;

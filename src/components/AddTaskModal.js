@@ -52,6 +52,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
   const [iosPickerMode, setIosPickerMode] = useState(null);
   const [pickerDraft, setPickerDraft] = useState(new Date());
   const [category, setCategory] = useState('Personal');
+  const [priority, setPriority] = useState('medium');
   const [geofenceEnabled, setGeofenceEnabled] = useState(false);
   const [activeWaypoint, setActiveWaypoint] = useState('');
   const [triggerRadius, setTriggerRadius] = useState('1 km'); // '500m' | '1 km' | '2 km'
@@ -73,6 +74,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
     if (taskToEdit) {
       setTaskName(taskToEdit.title || '');
       setCategory(taskToEdit.category || taskToEdit.tag || 'Personal');
+      setPriority(String(taskToEdit.priority || 'medium').toLowerCase());
       setDate(taskToEdit.date || '');
       setTargetTime(taskToEdit.time || '');
       setNotes(taskToEdit.description || '');
@@ -96,6 +98,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
   const resetForm = () => {
     setTaskName('');
     setCategory('Personal');
+    setPriority('medium');
     setScheduleStrategy('fixed');
     setDate('');
     setTargetTime('');
@@ -241,7 +244,7 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
       description: notes.trim(),
       source: geofenceEnabled ? 'location' : (taskToEdit?.source === 'location' ? 'manual' : (taskToEdit?.source || source)),
       completed: taskToEdit ? taskToEdit.completed : false,
-      priority: taskToEdit?.priority || 'medium',
+      priority,
       prayerQuietWindow: prayerQuietWindow,
       location_enabled: geofenceEnabled,
       location_name: geofenceEnabled ? activeWaypoint : null,
@@ -464,6 +467,32 @@ export default function AddTaskModal({ visible, onClose, onSaveTask, taskToEdit 
                     <Text style={[styles.categoryPillText, darkMode && { color: theme.textSecondary }, isSelected && styles.categoryPillTextActive, darkMode && isSelected && { color: '#FFFFFF' }]}>
                       {cat.label}
                     </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[styles.priorityLabel, { color: theme.textSecondary }]}>PRIORITY</Text>
+            <View style={styles.priorityRow}>
+              {[
+                { id: 'low', label: 'Low', color: '#15803D', background: '#DCFCE7' },
+                { id: 'medium', label: 'Medium', color: '#B45309', background: '#FEF3C7' },
+                { id: 'high', label: 'High', color: '#B91C1C', background: '#FEE2E2' },
+              ].map((item) => {
+                const selected = priority === item.id;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => setPriority(item.id)}
+                    style={[
+                      styles.priorityPill,
+                      { backgroundColor: darkMode ? theme.surfaceVariant : '#FFFFFF', borderColor: darkMode ? theme.border : '#CBD5E1' },
+                      selected && { backgroundColor: darkMode ? `${item.color}33` : item.background, borderColor: item.color },
+                    ]}
+                  >
+                    <View style={[styles.priorityDot, { backgroundColor: item.color }]} />
+                    <Text style={[styles.priorityPillText, { color: darkMode ? theme.textPrimary : '#334155' }, selected && { color: item.color, fontWeight: '800' }]}>{item.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -896,6 +925,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  priorityLabel: { marginTop: 16, marginBottom: 8, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+  priorityRow: { flexDirection: 'row', gap: 10 },
+  priorityPill: { flex: 1, minHeight: 42, borderRadius: 13, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  priorityDot: { width: 8, height: 8, borderRadius: 4 },
+  priorityPillText: { fontSize: 13, fontWeight: '600' },
   categoryPill: {
     flexDirection: 'row',
     alignItems: 'center',

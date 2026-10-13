@@ -685,7 +685,15 @@ function AppContent() {
   const handleSaveTask = async (taskData) => {
     let nextTasks;
     if (taskToEdit) {
-      if (taskToEdit.remote && supabase) {
+      if (taskToEdit.whatsappRemote && supabase) {
+        const { data, error } = await supabase.functions.invoke('whatsapp-task-status', {
+          body: { taskId: taskData.id, priority: taskData.priority || 'medium' },
+        });
+        if (error || !data?.ok) {
+          Alert.alert('Could not update task priority', data?.error || error?.message || 'Please try again.');
+          return false;
+        }
+      } else if (taskToEdit.remote && supabase) {
         const deadline = taskData.dueTime === 'No deadline set' ? null : taskData.dueTime;
         const { error } = await supabase.from('pending_inbox_detections')
           .update({ title: taskData.title, description: taskData.description || '', date_time: deadline, priority: taskData.priority || 'medium' })

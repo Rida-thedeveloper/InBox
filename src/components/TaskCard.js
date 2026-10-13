@@ -10,6 +10,12 @@ export default function TaskCard({ task, onToggleComplete, onPress, onActionPres
   const { darkMode, theme } = useTheme();
   const isCompleted = task.completed;
   const whatsappContactName = task.source === 'whatsapp' ? getWhatsAppContactName(task.sender) : null;
+  const priority = String(task.priority || 'medium').toLowerCase();
+  const priorityColors = priority === 'high'
+    ? { color: darkMode ? '#FCA5A5' : '#B91C1C', background: darkMode ? '#451A1A' : '#FEE2E2' }
+    : priority === 'low'
+      ? { color: darkMode ? '#86EFAC' : '#15803D', background: darkMode ? '#123322' : '#DCFCE7' }
+      : { color: darkMode ? '#FCD34D' : '#B45309', background: darkMode ? '#3D2D13' : '#FEF3C7' };
 
   const handleAction = () => {
     if (onActionPress) {
@@ -58,6 +64,11 @@ export default function TaskCard({ task, onToggleComplete, onPress, onActionPres
         {/* Source Badge */}
         <View style={styles.sourceRow}>
           <SourceBadge source={task.source} />
+          {!!priority && (
+            <View style={[styles.priorityBadge, { backgroundColor: priorityColors.background }]}>
+              <Text style={[styles.priorityText, { color: priorityColors.color }]}>{priority.toUpperCase()}</Text>
+            </View>
+          )}
         </View>
 
         {/* Title */}
@@ -165,8 +176,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
     marginBottom: 5,
   },
+  priorityBadge: { borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3 },
+  priorityText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   title: {
     fontSize: 15.5,
     fontWeight: '700',
