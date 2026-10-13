@@ -370,11 +370,48 @@ function AppContent() {
         ];
       });
     };
-    loadDetections();
-    const refreshTimer = globalThis.setInterval(loadDetections, 15000);
+    const refreshDetections = () => {
+      loadDetections().catch((error) => {
+        console.warn('Could not refresh detections:', error?.message || error);
+      });
+    };
+    refreshDetections();
+    const realtimeChannel = supabase
+      .channel(`inbox-detections-${authUserId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'pending_inbox_detections',
+        filter: `user_id=eq.${authUserId}`,
+      }, refreshDetections)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'whatsapp_tasks',
+        filter: `user_id=eq.${authUserId}`,
+      }, refreshDetections)
+      .subscribe();
+    const refreshTimer = globalThis.setInterval(refreshDetections, 15000);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshDetections();
+    });
+    const refreshOnFocus = () => refreshDetections();
+    const refreshWhenVisible = () => {
+      if (window.document.visibilityState === 'visible') refreshDetections();
+    };
+    if (Platform.OS === 'web') {
+      window.addEventListener('focus', refreshOnFocus);
+      window.document.addEventListener('visibilitychange', refreshWhenVisible);
+    }
     return () => {
       active = false;
       globalThis.clearInterval(refreshTimer);
+      appStateSubscription.remove();
+      if (Platform.OS === 'web') {
+        window.removeEventListener('focus', refreshOnFocus);
+        window.document.removeEventListener('visibilitychange', refreshWhenVisible);
+      }
+      supabase.removeChannel(realtimeChannel);
     };
   }, [authUserId, inboxRefreshKey]);
 
