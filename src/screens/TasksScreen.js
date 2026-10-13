@@ -29,6 +29,7 @@ export default function TasksScreen({
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'today' | 'upcoming' | 'completed'
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Study' | 'Work' | 'Personal'
+  const [selectedPriority, setSelectedPriority] = useState('all'); // 'all' | 'high' | 'medium' | 'low'
   const [selectedTaskForDetail, setSelectedTaskForDetail] = useState(null);
   const today = new Date().toISOString().slice(0, 10);
   const isToday = (task) => task.dueCategory === 'today' || task.date === today || (task.dueTime && task.dueTime.toLowerCase().includes('today'));
@@ -63,6 +64,7 @@ export default function TasksScreen({
       const cat = task.category || task.tag || '';
       if (cat.toLowerCase() !== selectedCategory.toLowerCase()) return false;
     }
+    if (selectedPriority !== 'all' && String(task.priority || 'medium').toLowerCase() !== selectedPriority) return false;
 
     // Search filter
     if (searchQuery.trim()) {
@@ -164,6 +166,7 @@ export default function TasksScreen({
                   setActiveTab(tab.id);
                   if (tab.id === 'all') {
                     setSelectedCategory('all');
+                    setSelectedPriority('all');
                     setSearchQuery('');
                   }
                 }}
@@ -205,6 +208,45 @@ export default function TasksScreen({
             );
           })}
         </ScrollView>
+
+        {/* Priority filter */}
+        <View style={styles.priorityFilterRow}>
+          <Text style={[styles.priorityFilterLabel, { color: theme.textMuted }]}>PRIORITY</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryFilterScroll}
+          >
+            {[
+              { id: 'all', label: 'All Priorities' },
+              { id: 'high', label: 'High' },
+              { id: 'medium', label: 'Medium' },
+              { id: 'low', label: 'Low' },
+            ].map((item) => {
+              const active = selectedPriority === item.id;
+              const tone = item.id === 'high' ? { color: '#B91C1C', background: darkMode ? '#451A1A' : '#FEE2E2', border: '#FCA5A5' }
+                : item.id === 'medium' ? { color: '#B45309', background: darkMode ? '#3D2D13' : '#FEF3C7', border: '#FCD34D' }
+                  : { color: '#15803D', background: darkMode ? '#123322' : '#DCFCE7', border: '#86EFAC' };
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[
+                    styles.catPill,
+                    { backgroundColor: theme.cardBackground, borderColor: theme.border },
+                    active && (item.id === 'all' ? styles.catPillActive : { backgroundColor: tone.background, borderColor: tone.border }),
+                  ]}
+                  onPress={() => setSelectedPriority(item.id)}
+                >
+                  <Text style={[styles.catPillText, { color: theme.textSecondary }, active && { color: item.id === 'all' ? '#2563EB' : tone.color, fontWeight: '700' }]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
       </View>
 
       {/* Task List */}
@@ -238,6 +280,10 @@ export default function TasksScreen({
           newestFirstTasks.map((task) => {
             const isDone = task.completed;
             const catConfig = getCategoryColor(task.category || task.tag);
+            const priority = String(task.priority || 'medium').toLowerCase();
+            const priorityConfig = priority === 'high' ? { label: 'High', color: darkMode ? '#FCA5A5' : '#B91C1C', background: darkMode ? '#451A1A' : '#FEE2E2' }
+              : priority === 'low' ? { label: 'Low', color: darkMode ? '#86EFAC' : '#15803D', background: darkMode ? '#123322' : '#DCFCE7' }
+                : { label: 'Medium', color: darkMode ? '#FCD34D' : '#B45309', background: darkMode ? '#3D2D13' : '#FEF3C7' };
 
             return (
               <View
@@ -270,6 +316,10 @@ export default function TasksScreen({
                       <Text style={[styles.categoryTagText, { color: catConfig.text }]}>
                         {task.category || task.tag || 'Uncategorized'}
                       </Text>
+                    </View>
+
+                    <View style={[styles.priorityTag, { backgroundColor: priorityConfig.background }]}>
+                      <Text style={[styles.priorityTagText, { color: priorityConfig.color }]}>{priorityConfig.label}</Text>
                     </View>
 
                     <View style={[styles.statusTag, isDone ? styles.statusDoneTag : styles.statusPendingTag]}>
@@ -456,6 +506,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 4,
   },
+  priorityFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
+  priorityFilterLabel: { width: 56, fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
   catPill: {
     paddingHorizontal: 12,
     paddingVertical: 5,
@@ -550,6 +602,8 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  priorityTag: { paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4 },
+  priorityTagText: { fontSize: 9.5, fontWeight: '800' },
   statusTag: {
     paddingHorizontal: 6,
     paddingVertical: 1.5,
