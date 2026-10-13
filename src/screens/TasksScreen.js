@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -24,6 +24,8 @@ export default function TasksScreen({
   onDeleteTask, 
   onAddTaskPress,
   initialTab = 'all',
+  initialTaskId = null,
+  onTaskFocused,
   user,
 }) {
   const { darkMode, theme } = useTheme();
@@ -39,6 +41,14 @@ export default function TasksScreen({
     const contactName = getWhatsAppContactName(sender);
     return contactName ? `WhatsApp · ${contactName}` : 'WhatsApp';
   };
+
+  useEffect(() => {
+    if (!initialTaskId) return;
+    const targetTask = tasks.find((task) => task.id === initialTaskId);
+    if (!targetTask) return;
+    setSelectedTaskForDetail(targetTask);
+    onTaskFocused?.();
+  }, [initialTaskId, tasks, onTaskFocused]);
 
   const tabs = [
     { id: 'all', label: 'All', count: tasks.length },

@@ -61,6 +61,7 @@ function AppContent() {
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [currentTab, setCurrentTab] = useState('home');
   const [taskTabFilter, setTaskTabFilter] = useState('all');
+  const [focusTaskId, setFocusTaskId] = useState(null);
   const [focusDetectionId, setFocusDetectionId] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [detections, setDetections] = useState([]);
@@ -1004,9 +1005,12 @@ function AppContent() {
   };
 
   const pendingDetectionsCount = detections.filter(d => d.status === 'pending').length;
-  const handleNavigateToTab = (tab, detectionId = null, taskFilter = 'all') => {
+  const handleNavigateToTab = (tab, detectionId = null, taskFilter = 'all', taskId = null) => {
     setFocusDetectionId(tab === 'detections' ? detectionId : null);
-    if (tab === 'tasks') setTaskTabFilter(taskFilter);
+    if (tab === 'tasks') {
+      setTaskTabFilter(taskFilter);
+      setFocusTaskId(taskId);
+    }
     setCurrentTab(tab);
   };
   const authUser = authSession?.user;
@@ -1060,6 +1064,8 @@ function AppContent() {
           <TasksScreen
             tasks={tasks}
             initialTab={taskTabFilter}
+            initialTaskId={focusTaskId}
+            onTaskFocused={() => setFocusTaskId(null)}
             user={userProfile}
             onToggleComplete={handleToggleComplete}
             onEditTask={handleEditTask}
