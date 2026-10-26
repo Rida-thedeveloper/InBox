@@ -1290,7 +1290,8 @@ const styles = StyleSheet.create({
     elevation: 12,
     left: 16,
     right: 16,
-    bottom: 100,
+    // Keep the undo action above the floating + button (80/96 bottom + 54px height).
+    bottom: Platform.OS === 'ios' ? 162 : 146,
     minHeight: 54,
     borderRadius: 14,
     paddingHorizontal: 18,
