@@ -26,3 +26,12 @@ export async function removeManualTask(userId, taskId) {
     JSON.stringify(tasks.filter((task) => task.id !== taskId)),
   );
 }
+
+export async function replaceSyncedManualTasks(userId, cloudTasks, deletedTaskIds = []) {
+  const cachedTasks = await loadManualTasks(userId);
+  const deletedIds = new Set((deletedTaskIds || []).map(String));
+  const locationTasks = cachedTasks.filter((task) => task.location_enabled && !task.completed && !deletedIds.has(String(task.id)));
+  const nextTasks = [...locationTasks, ...(cloudTasks || []).filter((task) => !task.completed)];
+  await AsyncStorage.setItem(getStorageKey(userId), JSON.stringify(nextTasks));
+  return nextTasks;
+}

@@ -18,8 +18,24 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const taskId = typeof body.taskId === 'string' ? body.taskId.trim() : '';
+    const shouldDelete = body.delete === true;
     const status = body.status;
     const priority = typeof body.priority === 'string' ? body.priority.toLowerCase() : undefined;
+    if (!taskId) return jsonResponse({ error: 'A task ID is required.' }, 400);
+
+    if (shouldDelete) {
+      const { data, error } = await createAdminClient()
+        .from('whatsapp_tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('user_id', user.id)
+        .select('id')
+        .maybeSingle();
+      if (error) throw new Error('Could not delete this WhatsApp task.');
+      if (!data) return jsonResponse({ error: 'This task was not found for your account.' }, 404);
+      return jsonResponse({ ok: true, id: data.id, deleted: true });
+    }
+
     const update: Record<string, string> = {};
     if (status !== undefined) {
       if (!['pending', 'approved', 'dismissed'].includes(status)) {
@@ -31,7 +47,7 @@ Deno.serve(async (req) => {
       if (!['low', 'medium', 'high'].includes(priority)) return jsonResponse({ error: 'Priority must be low, medium, or high.' }, 400);
       update.priority = priority;
     }
-    if (!taskId || !Object.keys(update).length) return jsonResponse({ error: 'A task ID and an allowed task change are required.' }, 400);
+    if (!Object.keys(update).length) return jsonResponse({ error: 'An allowed task change is required.' }, 400);
 
     const { data, error } = await createAdminClient()
       .from('whatsapp_tasks')

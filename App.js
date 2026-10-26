@@ -17,8 +17,8 @@ import { colors } from './src/theme/colors';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { completeAuthRedirect, getAuthRedirectUri, supabase } from './src/lib/supabase';
 import { getWhatsAppScheduleLabel } from './src/lib/whatsappSender';
-import { loadManualTasks, removeManualTask, saveManualTask } from './src/lib/manualTasks';
-import { deleteCloudManualTask, loadCloudManualTasks, saveCloudManualTask } from './src/lib/cloudTasks';
+import { loadManualTasks, removeManualTask, replaceSyncedManualTasks, saveManualTask } from './src/lib/manualTasks';
+import { deleteCloudManualTask, loadCloudDeletedManualTaskIds, loadCloudManualTasks, saveCloudManualTask } from './src/lib/cloudTasks';
 import {
   loadApprovedWhatsAppTaskIds,
   loadDismissedWhatsAppTaskIds,
@@ -80,6 +80,7 @@ function AppContent() {
   const pendingUndo = useRef(null);
   const undoTimer = useRef(null);
   const permissionAlertShown = useRef(false);
+  const manualTasksReady = useRef(false);
 
   const offerUndo = (message, undo, expire) => {
     if (undoTimer.current) globalThis.clearTimeout(undoTimer.current);
@@ -122,6 +123,7 @@ function AppContent() {
 
   useEffect(() => {
     let active = true;
+    manualTasksReady.current = false;
     (async () => {
       const storedTasks = await loadManualTasks(authUserId);
       const completedLocalTasks = storedTasks.filter((task) => task.completed);
@@ -134,12 +136,15 @@ function AppContent() {
       }
       const cachedTasks = storedTasks.filter((task) => !task.completed);
       let savedTasks = cachedTasks;
+      let deletedTaskIds = new Set();
       if (authUserId && supabase) {
         try {
+          deletedTaskIds = new Set(await loadCloudDeletedManualTaskIds(authUserId));
+          savedTasks = cachedTasks.filter((task) => !deletedTaskIds.has(String(task.id)));
           let cloudTasks = await loadCloudManualTasks(authUserId);
           const completedCloudTasks = cloudTasks.filter((task) => task.completed);
           const cleanupResults = await Promise.allSettled(completedCloudTasks.map((task) => (
-            deleteCloudManualTask(authUserId, task.id, { requireMatch: false })
+            deleteCloudManualTask(authUserId, task.id)
           )));
           if (cleanupResults.some((result) => result.status === 'rejected')) {
             console.warn('Some completed tasks could not be removed from Supabase yet.');
@@ -147,7 +152,7 @@ function AppContent() {
           cloudTasks = cloudTasks.filter((task) => !task.completed);
           // Migrate active cached tasks and retry local saves that missed Supabase while offline.
           const cloudTaskIds = new Set(cloudTasks.map((task) => task.id));
-          const unsyncedTasks = cachedTasks.filter((task) => !cloudTaskIds.has(task.id));
+          const unsyncedTasks = cachedTasks.filter((task) => !cloudTaskIds.has(task.id) && !deletedTaskIds.has(String(task.id)));
           if (unsyncedTasks.length) {
             await Promise.all(unsyncedTasks.map((task) => saveCloudManualTask(authUserId, task)));
             cloudTasks = await loadCloudManualTasks(authUserId);
@@ -159,13 +164,65 @@ function AppContent() {
           console.warn('Could not sync manual tasks with Supabase; showing cached tasks:', error?.message || error);
         }
       }
+      manualTasksReady.current = true;
       if (!active) return;
       setTasks((current) => [
-        ...current.filter((task) => !task.completed && (!task.id?.startsWith('task-manual-') || task.location_enabled)),
+        ...current.filter((task) => !task.completed
+          && (!task.id?.startsWith('task-manual-') || task.location_enabled)
+          && !deletedTaskIds.has(String(task.id))),
         ...savedTasks.filter((task) => !task.completed),
       ]);
     })();
     return () => { active = false; };
+  }, [authUserId]);
+
+  // Keep signed-in devices aligned with Supabase and discard stale cached tasks after remote deletes.
+  useEffect(() => {
+    if (!authUserId || !supabase) return undefined;
+    let active = true;
+    let refreshId = 0;
+    const refreshManualTasks = async () => {
+      if (!manualTasksReady.current) return;
+      const currentRefresh = ++refreshId;
+      try {
+        const deletedTaskIds = new Set(await loadCloudDeletedManualTaskIds(authUserId));
+        const cloudTasks = await loadCloudManualTasks(authUserId);
+        if (!active || currentRefresh !== refreshId) return;
+        const localTasks = await replaceSyncedManualTasks(authUserId, cloudTasks, [...deletedTaskIds]);
+        if (!active || currentRefresh !== refreshId) return;
+        const savedLocationTasks = await loadLocationTasks(authUserId);
+        const removedLocationTasks = savedLocationTasks.filter((task) => deletedTaskIds.has(String(task.id)));
+        if (removedLocationTasks.length) {
+          const keptLocationTasks = savedLocationTasks.filter((task) => !deletedTaskIds.has(String(task.id)));
+          await syncLocationGeofences(authUserId, keptLocationTasks);
+          await Promise.all(removedLocationTasks.map((task) => cancelLocationTaskNotifications(task.id)));
+        }
+        setTasks((current) => [
+          ...current.filter((task) => (!task.id?.startsWith('task-manual-') || task.location_enabled)
+            && !deletedTaskIds.has(String(task.id))),
+          ...cloudTasks,
+          ...localTasks.filter((task) => task.location_enabled),
+        ].filter((task, index, all) => all.findIndex((item) => item.id === task.id) === index));
+      } catch (error) {
+        console.warn('Could not refresh tasks from Supabase:', error?.message || error);
+      }
+    };
+    const channel = supabase
+      .channel(`manual-inbox-tasks-${authUserId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'manual_inbox_tasks', filter: `user_id=eq.${authUserId}` }, refreshManualTasks)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deleted_manual_inbox_tasks', filter: `user_id=eq.${authUserId}` }, refreshManualTasks)
+      .subscribe();
+    refreshManualTasks();
+    const timer = globalThis.setInterval(refreshManualTasks, 5000);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshManualTasks();
+    });
+    return () => {
+      active = false;
+      globalThis.clearInterval(timer);
+      appStateSubscription.remove();
+      supabase.removeChannel(channel);
+    };
   }, [authUserId]);
 
   useEffect(() => {
@@ -177,7 +234,20 @@ function AppContent() {
         return;
       }
       await setLocationReminderOwner(authUserId);
-      const savedTasks = await loadLocationTasks(authUserId);
+      let savedTasks = await loadLocationTasks(authUserId);
+      if (supabase) {
+        try {
+          const deletedTaskIds = new Set(await loadCloudDeletedManualTaskIds(authUserId));
+          const removedTasks = savedTasks.filter((task) => deletedTaskIds.has(String(task.id)));
+          if (removedTasks.length) {
+            savedTasks = savedTasks.filter((task) => !deletedTaskIds.has(String(task.id)));
+            await syncLocationGeofences(authUserId, savedTasks);
+            await Promise.all(removedTasks.map((task) => cancelLocationTaskNotifications(task.id)));
+          }
+        } catch (error) {
+          console.warn('Could not check deleted location tasks:', error?.message || error);
+        }
+      }
       if (!active) return;
       setTasks((current) => [
         ...current.filter((task) => !task.location_enabled && !task.completed),
@@ -217,7 +287,7 @@ function AppContent() {
           const updated = await markLocationTaskDone(authUserId, taskId, tasks);
           setTasks(updated);
           if (task?.id?.startsWith('task-manual-')) {
-            await deleteCloudManualTask(authUserId, taskId, { requireMatch: false });
+            await deleteCloudManualTask(authUserId, taskId);
             await removeManualTask(authUserId, taskId);
           }
           await cancelLocationTaskNotifications(taskId);
@@ -543,33 +613,10 @@ function AppContent() {
 
   const deleteWhatsAppTaskFromDatabase = async (taskId) => {
     if (!supabase) throw new Error('Supabase is not available. Please try again.');
-    const { data, error, status, statusText } = await supabase
-      .from('whatsapp_tasks')
-      .delete()
-      .eq('id', taskId)
-      .select('id');
-    if (error) {
-      console.error('[WhatsApp task DELETE] Supabase error', {
-        taskId,
-        status,
-        statusText,
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      });
-      throw error;
-    }
-    if (!data?.some((row) => row.id === taskId)) {
-      console.error('[WhatsApp task DELETE] Supabase returned no deleted row', {
-        taskId,
-        status,
-        statusText,
-        data,
-      });
-      throw new Error('The WhatsApp task was not removed from the database. Check its delete policy and try again.');
-    }
-    console.info('[WhatsApp task DELETE] Supabase success', { taskId, status, statusText, data });
+    const { data, error } = await supabase.functions.invoke('whatsapp-task-status', {
+      body: { taskId, delete: true },
+    });
+    if (error || !data?.ok) throw new Error(data?.error || error?.message || 'The WhatsApp task could not be removed from Supabase.');
     deletedWhatsAppTaskIds.current.add(taskId);
   };
 
@@ -613,6 +660,8 @@ function AppContent() {
 
   const hideRemoteTaskInApp = async (task) => {
     const { id } = task;
+    if (task.whatsappRemote) await deleteWhatsAppTaskFromDatabase(id);
+    else if (task.remote) await deleteRemoteDetectionTask(id);
     hiddenRemoteTaskIds.current.add(id);
     if (task.whatsappRemote) deletedWhatsAppTaskIds.current.add(id);
     setTasks((current) => current.filter((item) => item.id !== id));
@@ -620,15 +669,7 @@ function AppContent() {
     try {
       await saveHiddenRemoteTaskIds(authUserId, [...hiddenRemoteTaskIds.current]);
     } catch (error) {
-      console.warn('Task was hidden in this session but could not be saved locally:', error?.message || error);
-    }
-
-    try {
-      if (task.whatsappRemote) await deleteWhatsAppTaskFromDatabase(id);
-      else if (task.remote) await deleteRemoteDetectionTask(id);
-    } catch (error) {
-      // Keep the task removed from this app even if Supabase cannot remove its row.
-      console.warn('Task remains hidden in this app; Supabase removal failed:', error?.message || error);
+      console.warn('Deleted task could not be added to the local hidden-task cache:', error?.message || error);
     }
   };
 
@@ -637,11 +678,15 @@ function AppContent() {
     const currentTask = tasks.find((task) => task.id === taskId);
     const isCompleting = !currentTask?.completed;
     if (currentTask?.whatsappRemote && isCompleting) {
-      await hideRemoteTaskInApp(currentTask);
+      try { await hideRemoteTaskInApp(currentTask); } catch (error) {
+        Alert.alert('Could not complete task', error?.message || 'Supabase could not remove this task. Please try again.');
+      }
       return;
     }
     if (currentTask?.remote && isCompleting) {
-      await hideRemoteTaskInApp(currentTask);
+      try { await hideRemoteTaskInApp(currentTask); } catch (error) {
+        Alert.alert('Could not complete task', error?.message || 'Supabase could not remove this task. Please try again.');
+      }
       return;
     }
     const nextTasks = tasks.map((task) => task.id === taskId ? { ...task, completed: !task.completed } : task);
@@ -654,7 +699,7 @@ function AppContent() {
         if (isCompleting) {
           if (!task.location_enabled) await removeManualTask(authUserId, taskId);
           if (task.location_enabled) await syncLocationGeofences(authUserId, nextTasks);
-          if (authUserId) await deleteCloudManualTask(authUserId, taskId, { requireMatch: false });
+          if (authUserId) await deleteCloudManualTask(authUserId, taskId);
         } else {
           if (authUserId) await saveCloudManualTask(authUserId, task);
           if (!task.location_enabled) await saveManualTask(authUserId, task);
